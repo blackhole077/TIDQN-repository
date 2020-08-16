@@ -12,8 +12,8 @@ import tensorflow as tf
 # from keras.layers import Activation, Conv2D, Dense, Flatten, Input, Permute
 from keras.layers import *
 from keras.models import Model, Sequential
-from keras.optimizers import Adam
-from keras.callbacks import ModelCheckpoint
+from keras.optimizers import SGD
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
 from matplotlib.pyplot import imshow
 from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix
@@ -100,7 +100,7 @@ def build_dataset(base_path=None):
     images = np.array(image_list)
     images = np.reshape(images, (-1, 4, 84, 84))
     labels = np.array(label_list)
-    class_weights = dict(enumerate(class_weight.compute_class_weight('balanced', np.unique(labels), labels)))
+    class_weights = dict(enumerate(class_weight.compute_class_weight('balanced', classes=np.unique(labels), y=labels)))
     print("Shape of images: {}".format(images.shape))
     print("Shape of labels: {}".format(labels.shape))
     return images, labels, len(directories), class_weights
@@ -145,6 +145,7 @@ print("Null Values:{}".format(np.argwhere(np.isnan(images))))
 # print("Null Values:{}".format(np.argwhere(np.isnan(labels))))
 # print("Dim images:{}".format(images.shape))
 # print(labels[0])
+indices = np.arange(images.shape[0])
 (trainX, testX, trainY, testY, _, test_indices) = train_test_split(images,
 	labels, indices, test_size=0.25, stratify=labels)
 print("Class Weights: {}".format(class_weights))
@@ -153,21 +154,21 @@ print("Class Weights: {}".format(class_weights))
 base_model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, NB_ACTIONS)
 weights_location = "weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=off-ns=5000000-seed=64251_weights.h5f"
 new_model = build_diver_network(weights_location, num_classes)
-opt = SGD(learning_rate=0.005, nesterov=True)
+opt = SGD(learning_rate=0.01, nesterov=True)
 new_model.compile(optimizer=opt, loss=keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
 train_generator = batch_generator(trainX, trainY, train=True)
 valid_generator = batch_generator(testX, testY)
-# h = new_model.fit(x=trainX, y=trainY, batch_size=128, epochs=10, validation_data=(testX, testY))
-EPOCHS = 400
+EPOCHS = 3000
 file_name = 'diver_locator_weights_dropout_{}.h5'.format(EPOCHS)
 model_checkpointer = ModelCheckpoint(file_name, monitor='val_accuracy', save_best_only=True, save_weights_only=True, verbose=1)
+plateau_lr = ReduceLROnPlateau(min_lr=0.001, verbose=1)
 history = new_model.fit_generator(train_generator,
                             steps_per_epoch= (BATCH_SIZE**2)//BATCH_SIZE,
                             epochs=EPOCHS,
                             class_weight=class_weights,
                             validation_data=valid_generator,
                             validation_steps= (BATCH_SIZE**2) // BATCH_SIZE,
-                            callbacks=[model_checkpointer])
+                            callbacks=[model_checkpointer, plateau_lr])
 print("Highest Accuracy: {}\n".format(max(history.history['accuracy'])))
 plt.plot(history.history['accuracy'])
 plt.plot(history.history['val_accuracy'])
