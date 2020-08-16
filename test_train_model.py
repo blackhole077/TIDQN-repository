@@ -145,8 +145,8 @@ print("Null Values:{}".format(np.argwhere(np.isnan(images))))
 # print("Null Values:{}".format(np.argwhere(np.isnan(labels))))
 # print("Dim images:{}".format(images.shape))
 # print(labels[0])
-(trainX, testX, trainY, testY) = train_test_split(images,
-	labels, test_size=0.25)
+(trainX, testX, trainY, testY, _, test_indices) = train_test_split(images,
+	labels, indices, test_size=0.25, stratify=labels)
 print("Class Weights: {}".format(class_weights))
 
 # model = build_diver_finder_model(output_size=num_classes)
