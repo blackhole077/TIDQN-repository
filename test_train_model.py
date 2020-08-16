@@ -9,19 +9,18 @@ import keras.preprocessing.image
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-# from keras.layers import Activation, Conv2D, Dense, Flatten, Input, Permute
-from keras.layers import *
+from keras.callbacks import Callback, ModelCheckpoint
+from keras.layers import Dense, Dropout
 from keras.models import Model, Sequential
-from keras.optimizers import Adam
-from keras.callbacks import ModelCheckpoint
+from keras.optimizers import SGD
+from keras.preprocessing.image import ImageDataGenerator
 from matplotlib.pyplot import imshow
 from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import class_weight
-from sklearn.metrics import classification_report, confusion_matrix
-import matplotlib.pyplot as plt
+
 import models.atari_model as atari_model
 
 WINDOW_LENGTH = 4
@@ -72,12 +71,6 @@ def build_dataset(base_path=None):
         "up_right": 3,
         "down_right": 4
     }
-    # label_map_dict={
-    #     "up_left": 0,
-    #     "down_left": 1,
-    #     "up_right": 2,
-    #     "down_right": 3
-    # }
     directories = [_dir for _dir in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, _dir))]
     print("Directories: {}".format(directories))
     for class_name in directories:
@@ -90,20 +83,21 @@ def build_dataset(base_path=None):
             img = np.array(img).astype(np.float32)
             img = img / 255.
             # Make Lazy Frame stack of 4 frames
-            img = np.repeat(img[:, :, np.newaxis], 4, axis=2)
+            # img = np.repeat(img[:, :, np.newaxis], 4, axis=2)
             label_to_append = label_map_dict[class_name]
             if label_to_append is None:
                 raise ValueError("Expected a label for {} got None.".format(class_name))
             label_list.append(label_map_dict.get(class_name))
-
             image_list.append(img)
-    images = np.array(image_list)
-    images = np.reshape(images, (-1, 4, 84, 84))
+            image_paths.append(image_path)
+    # images = np.array(image_list)
+    # images = np.reshape(images, (-1, 4, 84, 84))
     labels = np.array(label_list)
-    class_weights = dict(enumerate(class_weight.compute_class_weight('balanced', np.unique(labels), labels)))
-    print("Shape of images: {}".format(images.shape))
-    print("Shape of labels: {}".format(labels.shape))
-    return images, labels, len(directories), class_weights
+    class_weights = dict(enumerate(class_weight.compute_class_weight('balanced', classes=np.unique(labels), y=labels)))
+    # print("Shape of images: {}".format(images.shape))
+    # print("Shape of labels: {}".format(labels.shape))
+    # return images, labels, len(directories), class_weights
+    return image_list, label_list, len(directories), class_weights
 
 def batch_generator(X, Y, batch_size = BATCH_SIZE, train=False):
     indices = np.arange(len(X)) 
@@ -118,6 +112,21 @@ def batch_generator(X, Y, batch_size = BATCH_SIZE, train=False):
                     yield X[batch], Y[batch]
                     batch=[]
 
+def perform_augments(instances=None, labels=None, train=False):
+    temp = []
+    for img in instances:
+        if train:
+            # Perform augments here
+            # Try and black out the divers rescued section.
+            img[70:75, 25:60] = 0.0
+        img = np.repeat(img[:, :, np.newaxis], 4, axis=2)
+        temp.append(img)
+    numpy_instances = np.array(temp)
+    print(numpy_instances.shape)
+    print(numpy_instances[0].shape)
+    numpy_instances = np.reshape(numpy_instances, (-1, 4, 84, 84))
+    numpy_labels = np.array(labels)
+    return numpy_instances, numpy_labels
 
 def build_diver_network(base_weights=None, num_classes=None):
     base_model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, NB_ACTIONS)
@@ -139,18 +148,17 @@ def build_diver_network(base_weights=None, num_classes=None):
 image_paths = []
 base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\frames"
 images, labels, num_classes, class_weights = build_dataset(base_name)
-print("Dim images:{}".format(images.shape))
-# print(images[0])
-print("Null Values:{}".format(np.argwhere(np.isnan(images))))
-# print("Null Values:{}".format(np.argwhere(np.isnan(labels))))
 # print("Dim images:{}".format(images.shape))
-# print(labels[0])
-(trainX, testX, trainY, testY) = train_test_split(images,
-	labels, test_size=0.25)
+# print("Null Values:{}".format(np.argwhere(np.isnan(images))))
+# indices = np.arange(images.shape[0])
+indices = np.arange(len(images))
+(trainX, testX, trainY, testY, _, test_indices) = train_test_split(images,
+	labels, indices, test_size=0.25, stratify=labels)
+print(trainX[0].shape)
+trainX, trainY = perform_augments(trainX, trainY, True)
+testX, testY = perform_augments(testX, testY, False)
+# augment_training_instances(trainX)
 print("Class Weights: {}".format(class_weights))
-
-# model = build_diver_finder_model(output_size=num_classes)
-base_model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, NB_ACTIONS)
 weights_location = "weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=off-ns=5000000-seed=64251_weights.h5f"
 new_model = build_diver_network(weights_location, num_classes)
 opt = SGD(learning_rate=0.005, nesterov=True)
@@ -169,6 +177,7 @@ history = new_model.fit_generator(train_generator,
                             validation_steps= (BATCH_SIZE**2) // BATCH_SIZE,
                             callbacks=[model_checkpointer])
 print("Highest Accuracy: {}\n".format(max(history.history['accuracy'])))
+print("Highest Validation Accuracy: {}\n".format(max(history.history['val_accuracy'])))
 plt.plot(history.history['accuracy'])
 plt.plot(history.history['val_accuracy'])
 plt.title('model accuracy')
