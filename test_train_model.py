@@ -1,3 +1,4 @@
+import itertools
 import os
 import sys
 
@@ -5,6 +6,7 @@ import cv2
 import keras.backend as K
 import keras.losses
 import keras.preprocessing.image
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 # from keras.layers import Activation, Conv2D, Dense, Flatten, Input, Permute
@@ -14,6 +16,7 @@ from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint
 from matplotlib.pyplot import imshow
 from PIL import Image
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import class_weight
@@ -25,6 +28,39 @@ WINDOW_LENGTH = 4
 INPUT_SHAPE = (84, 84)
 NB_ACTIONS = 18
 BATCH_SIZE= 256
+
+def plot_confusion_matrix(cm, classes,
+                        normalize=False,
+                        title='Confusion matrix',
+                        cmap=plt.cm.get_cmap("Blues")):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    print(cm)
+
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, "{:0.3f}".format(cm[i, j]),
+            horizontalalignment="center",
+            color="white" if cm[i, j] > thresh else "black")
+
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
 
 def build_dataset(base_path=None):
     image_list = []
@@ -69,12 +105,13 @@ def build_dataset(base_path=None):
     print("Shape of labels: {}".format(labels.shape))
     return images, labels, len(directories), class_weights
 
-def batch_generator(X, Y, batch_size = BATCH_SIZE):
+def batch_generator(X, Y, batch_size = BATCH_SIZE, train=False):
     indices = np.arange(len(X)) 
     batch=[]
     while True:
             # it might be a good idea to shuffle your data before each epoch
-            np.random.shuffle(indices) 
+            if train:
+                np.random.shuffle(indices)
             for i in indices:
                 batch.append(i)
                 if len(batch)==batch_size:
@@ -82,6 +119,24 @@ def batch_generator(X, Y, batch_size = BATCH_SIZE):
                     batch=[]
 
 
+def build_diver_network(base_weights=None, num_classes=None):
+    base_model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, NB_ACTIONS)
+    base_model.load_weights(base_weights)
+    diver_model = Sequential()
+    for layer in base_model.layers[:-1]:
+        layer.trainable = False
+        diver_model.add(layer)
+    diver_model.layers[-1].trainable = True
+    diver_model.add(Dense(32, activation='relu'))
+    diver_model.add(Dropout(0.25))
+    diver_model.add(Dense(32, activation='relu'))
+    diver_model.add(Dropout(0.25))
+    diver_model.add(Dense(num_classes, activation='softmax'))
+    diver_model = keras.models.model_from_json(diver_model.to_json())
+    diver_model.summary()
+    return diver_model
+
+image_paths = []
 base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\frames"
 images, labels, num_classes, class_weights = build_dataset(base_name)
 print("Dim images:{}".format(images.shape))
@@ -97,48 +152,21 @@ print("Class Weights: {}".format(class_weights))
 # model = build_diver_finder_model(output_size=num_classes)
 base_model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, NB_ACTIONS)
 weights_location = "weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=off-ns=5000000-seed=64251_weights.h5f"
-base_model.load_weights(weights_location)
-base_model.summary()
-# model._layers.pop(1)
-# model._layers[-1] = Dense(5, activation='linear')(model._layers[-2])
-# print(model._layers[1].batch_input_shape)
-# model.summary()
-print(base_model._layers[2])
-new_model = Sequential()
-# input_section.add(Input(shape=(84,84,1)))
-# new_model.add(Conv2D(32, (8, 8), activation='relu', strides=(4, 4), input_shape=(84,84,1)))
-# print(base_model._layers)
-# print(base_model._layers[2].batch_input_shape)
-# new_model._layers[0].set_weights([base_model.layers[2].get_weights()])
-# new_model = Sequential()
-# new_model.add(new_input)
-for layer in base_model.layers[:-1]:
-    layer.trainable = False
-    new_model.add(layer)
-# Only set the Dense Layer to be trainable.
-new_model.layers[-1].trainable = True
-# Change the output to match new labels
-new_model.add(Dense(32, activation='relu'))
-new_model.add(Dropout(0.25))
-new_model.add(Dense(32, activation='relu'))
-new_model.add(Dropout(0.25))
-new_model.add(Dense(5, activation='softmax'))
-
-new_model = keras.models.model_from_json(new_model.to_json())
-new_model.compile(optimizer='sgd', loss=keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
-# new_model.summary()
-train_generator = batch_generator(trainX, trainY)
+new_model = build_diver_network(weights_location, num_classes)
+opt = SGD(learning_rate=0.005, nesterov=True)
+new_model.compile(optimizer=opt, loss=keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
+train_generator = batch_generator(trainX, trainY, train=True)
 valid_generator = batch_generator(testX, testY)
 # h = new_model.fit(x=trainX, y=trainY, batch_size=128, epochs=10, validation_data=(testX, testY))
-
-model_checkpointer = ModelCheckpoint('diver_locator_weights_dropout.h5', monitor='val_accuracy', save_best_only=True, save_weights_only=True)
-
+EPOCHS = 400
+file_name = 'diver_locator_weights_dropout_{}.h5'.format(EPOCHS)
+model_checkpointer = ModelCheckpoint(file_name, monitor='val_accuracy', save_best_only=True, save_weights_only=True, verbose=1)
 history = new_model.fit_generator(train_generator,
-                            steps_per_epoch=65536//BATCH_SIZE,
-                            epochs=400,
+                            steps_per_epoch= (BATCH_SIZE**2)//BATCH_SIZE,
+                            epochs=EPOCHS,
                             class_weight=class_weights,
                             validation_data=valid_generator,
-                            validation_steps=65536 // BATCH_SIZE,
+                            validation_steps= (BATCH_SIZE**2) // BATCH_SIZE,
                             callbacks=[model_checkpointer])
 print("Highest Accuracy: {}\n".format(max(history.history['accuracy'])))
 plt.plot(history.history['accuracy'])
@@ -148,10 +176,29 @@ plt.ylabel('accuracy')
 plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
-# Y_pred = new_model.predict_generator(valid_generator, 65536 // BATCH_SIZE)
-# y_pred = np.argmax(Y_pred, axis=1)
-# print('Confusion Matrix')
-# print(confusion_matrix(valid_generator.classes, y_pred))
+print("Y True")
+print(testY)
+test_generator = batch_generator(testX, testY, batch_size=len(testY))
+Y_pred = new_model.predict_generator(test_generator, 1)
+y_pred = np.argmax(Y_pred, axis=1)
+incorrects = np.nonzero(y_pred != testY)[0]
+print("Y Predictions")
+print(y_pred)
+print(incorrects)
+label_dict = {
+    0: "no_divers",
+    1: "up_left",
+    2: "down_left",
+    3: "up_right",
+    4: "down_right"
+}
+for index in incorrects:
+    print("Index: {} Prediction {} True {}".format(test_indices[index], label_dict[y_pred[index]], label_dict[testY[index]]))
+    print(image_paths[int(test_indices[index])])
+
+cm = confusion_matrix(testY, y_pred, labels=[0,1,2,3,4])
+plot_confusion_matrix(cm=cm, classes=["no_divers", "up_left", "down_left", "up_right", "down_right"], normalize=True)
+plt.show()
 # print('Classification Report')
 # target_names = list(labels)
 # print(classification_report(valid_generator.classes, y_pred, target_names=target_names))
