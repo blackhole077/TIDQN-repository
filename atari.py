@@ -1,28 +1,24 @@
-import os
 import argparse
-import yaml
+import os
 
+import gym
 import numpy as np
 import pandas as pd
-import gym
 import tensorflow as tf
+from gym import wrappers
+from keras.backend.tensorflow_backend import set_session
+from keras.optimizers import Adam
 
 import models.atari_model as atari_model
 import models.merged_model as merged_model
-# import processors.contract_processor as contract_processor
-# import processors.stateful_contract_processor as stateful_contract_processor
-# import processors.action_history_contract_processor as action_history_contract_processor
-# import processors.graph_emb_processor as graph_emb_processor
-import processors.rajagopal_processor as rajagopal_processor
 import processors.atari_processor as atari_processor
-from keras.optimizers import Adam
-from keras.backend.tensorflow_backend import set_session
+import processors.rajagopal_processor as rajagopal_processor
+from callbacks.contract_callbacks import ContractLogger
 from rl.agents.dqn import DQNAgent
+from rl.callbacks import FileLogger, RajagopalFileLogger
 from rl.memory import SequentialMemory
 from rl.policy import EpsGreedyQPolicy, LinearAnnealedPolicy
-from callbacks.contract_callbacks import ContractLogger
-from rl.callbacks import FileLogger, RajagopalFileLogger
-from gym import wrappers
+
 # from envs.doom import make_env as make_doom_env
 
 config = tf.ConfigProto()
@@ -37,25 +33,6 @@ WINDOW_LENGTH = 4
 VISUALIZE = False
 VERBOSE = 1
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--task', type=str)
-parser.add_argument('--env-name', type=str,)
-parser.add_argument('--contract', type=str)
-parser.add_argument('--architecture', type=str)
-parser.add_argument('--contract-mode', type=str, choices=['off', 'punish', 'halt'])
-parser.add_argument('--steps', type=int)
-parser.add_argument('--train_seed', type=int)
-parser.add_argument('--test_seed', type=int)
-parser.add_argument('--emb', type=str)
-parser.add_argument('--enforce_contract', type=bool, default=False)
-parser.add_argument('--doom_scenario', type=str)
-parser.add_argument('--log_root', type=str, default='./slurmlogs/')
-parser.add_argument('--weights_root', type=str, default='./weights/')
-parser.add_argument('--weights_suffix', type=str, default='_weights.h5f')
-
-args = parser.parse_args()
-
-
 def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, train_seed, test_seed=None):
     root = 'env={}-c={}-arc={}-mode={}-ns={}-seed={}'.format(env_name, contract, architecture, contract_mode, steps, train_seed)
     if test_seed is not None:
@@ -63,18 +40,13 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
     return root
 
 
-def build_dqn(env_name, contract, architecture, contract_mode, steps, nb_actions, emb, enforce_contract, log_prefix, testing=False):
-    # map from contract name to regex
-    # config = yaml.load(open('./pipeline/config.yaml'))
-    # contract = config[env_name][contract]['regular']
+def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
     number_conditionals = 3
     if architecture == 'original':
         processor = atari_processor.AtariProcessor(testing=testing)
         model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
     elif architecture == 'rajagopal_processor':
-        # 3.) DFA STATE NETWORK USING ONE-HOT
-        # Model=merged model; Processor=contract processor
         processor = rajagopal_processor.RajagopalProcessor(
             nb_conditional=number_conditionals,
             testing=testing
@@ -109,6 +81,13 @@ def build_dqn(env_name, contract, architecture, contract_mode, steps, nb_actions
 
 
 def build_env(env_name, scenario):
+    """
+        Build the environment for the model to use.
+
+        Builds the environment specified by the user arguments.
+        Currently only supports creating environments that exist
+        in OpenAI Gym, namely the Atari Learning Environment (ALE).
+    """
     if env_name == 'doom' and scenario is not None:
         # env = make_doom_env(scenario = scenario, grayscale=False, input_shape=INPUT_SHAPE)
         pass
@@ -116,116 +95,79 @@ def build_env(env_name, scenario):
         env = gym.make(env_name)
     return env
 
-def train(env_name=None, contract=None, architecture=None, contract_mode=None, steps=None, train_seed=None, emb=None, enforce_contract=None, doom_scenario=None):
-    env = build_env(env_name, doom_scenario)
-    np.random.seed(train_seed)
-    env.seed(train_seed)
+def generate_filename_prefix(atari_arguments=None, prefix_type=None):
+    if atari_arguments is None:
+        raise ValueError("No arguments provided.")
+    root = 'env={}-c={}-arc={}-mode={}-ns={}-seed={}'.format(atari_arguments.get("environment"),
+                                                            atari_arguments.get("contract"),
+                                                            atari_arguments.get("architecture"),
+                                                            atari_arguments.get("contract_mode"),
+                                                            atari_arguments.get("steps"),
+                                                            atari_arguments.get("train_seed"))
+    if prefix_type == 'log':
+        if atari_arguments.get("test_seed") is not None:
+            root += '-test_seed=' + str(atari_arguments.get("test_seed"))
+    elif prefix_type == 'weight':
+        if atari_arguments.get("weights_suffix") is not None:
+            root += atari_arguments.get("weights_suffix")
+    else:
+        raise ValueError("Expected either 'log' or 'weight', got {}\n".format(prefix_type))
+    return root
+
+
+def train(atari_arguments=None):
+    if atari_arguments is None:
+        raise ValueError("No arguments provided.")
+    # Build the environment specified by the user.
+    env = build_env(atari_arguments.get("environment"), atari_arguments.get("doom_scenario"))
+    # Seed the random number generator (RNG) for both Numpy and the environment
+    np.random.seed(atari_arguments.get("train_seed"))
+    env.seed(atari_arguments.get("train_seed"))
+    # Determine the number of actions available to the agent
     nb_actions = env.action_space.n
 
-    filename_prefix = filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, train_seed, None)
-    log_prefix = os.path.join(args.log_root, filename_prefix)
-    weights_prefix = os.path.join(args.weights_root, filename_prefix)
+    # Construct the file name prefix for saving all things related to the model
+    log_location = os.path.join(atari_arguments.get("log_directory"), generate_filename_prefix(atari_arguments, 'log'))
+    weights_location = os.path.join(atari_arguments.get("weights_directory"), generate_filename_prefix(atari_arguments, 'weight'))
 
-    dqn = build_dqn(env_name, contract, architecture, contract_mode, steps, nb_actions, None, enforce_contract, log_prefix)
-
-    callbacks = [FileLogger(log_prefix + '_information.json', 1), RajagopalFileLogger(log_prefix + '_info_dict_information.json', 1)]
-    # callbacks = [ContractLogger(log_prefix + '_callback.csv'), RajagopalTrainIntervalLogger(log_prefix + '_information.csv', 10000)]
-    dqn.fit(
+    # Build the DQN model provided the parameters
+    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, testing=False)
+    
+    # Define the callback functions
+    callbacks = [FileLogger(log_location + '_information.json', 1), RajagopalFileLogger(log_location + '_info_dict_information.json', 1)]
+    
+    dqn_model.fit(
         env,
-        nb_steps=steps,
+        nb_steps=atari_arguments.get("steps"),
         log_interval=10000,
         visualize=VISUALIZE,
         verbose=VERBOSE,
         callbacks=callbacks)
-    weights_filename = weights_prefix + '_weights.h5f'
-    return dqn.save_weights(weights_filename, overwrite=True)
+    
+    return dqn_model.save_weights(weights_location, overwrite=True)
 
+def test(atari_arguments=None):
+    if atari_arguments is None:
+        raise ValueError("No arguments provided.")
 
-def test(env_name=None, contract=None, architecture=None, contract_mode=None, steps=None, train_seed=None, test_seed=None, emb=None, enforce_contract=None, doom_scenario=None, weights_suffix='_weights.h5f'):
-    log_prefix = os.path.join(args.log_root, filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, train_seed, test_seed))
-    env = build_env(env_name, doom_scenario)
-    env = wrappers.Monitor(env, log_prefix + '_video_test')
-    np.random.seed(test_seed)
-    env.seed(test_seed)
+    # Construct the file name prefix for saving all things related to the model
+    log_location = os.path.join(atari_arguments.get("log_directory"), generate_filename_prefix(atari_arguments, 'log'))
+    weights_location = os.path.join(atari_arguments.get("weights_directory"), generate_filename_prefix(atari_arguments, 'weight'))
+
+    # Build the environment specified by the user.
+    env = build_env(atari_arguments.get("environment"), atari_arguments.get("doom_scenario"))
+    # Start up a Monitor that will record videos of the gameplay for empirical analysis.
+    env = wrappers.Monitor(env, log_location + '_video_test')
+    # Seed the random number generator (RNG) for both Numpy and the environment
+    np.random.seed(atari_arguments.get("test_seed"))
+    env.seed(atari_arguments.get("test_seed"))
+    # Determine the number of actions available to the agent
     nb_actions = env.action_space.n
+    # Build the DQN model provided the parameters
+    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, testing=True)
+    # Load the saved weights
+    dqn_model.load_weights(weights_location)
+    # Define the callback functions
+    callbacks = [ContractLogger(log_location + '_callback_test.csv')]
 
-    log_prefix = os.path.join(args.log_root, filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, train_seed, test_seed))
-    weights_filename = os.path.join(args.weights_root, filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, train_seed, None)) + weights_suffix
-
-    dqn = build_dqn(env_name, contract, architecture, contract_mode, steps, nb_actions, emb, enforce_contract, log_prefix, True)
-    dqn.load_weights(weights_filename)
-
-    callbacks = [ContractLogger(log_prefix + '_callback_test.csv')]
-    # callbacks = [FileLogger(log_prefix + '_information_test.json', 1)]
-
-    dqn.test(env, nb_episodes=100, visualize=False, nb_max_start_steps=100, callbacks=callbacks)
-
-
-if __name__ == '__main__':
-    if args.task == 'train':
-        train(args.env_name, args.contract, args.architecture, args.contract_mode, args.steps, args.train_seed, args.emb, args.enforce_contract, args.doom_scenario)
-    elif args.task == 'test':
-        test(args.env_name, args.contract, args.architecture, args.contract_mode, args.steps, args.train_seed, args.test_seed, args.emb, args.enforce_contract, args.doom_scenario, args.weights_suffix)
-    else:
-        assert False, 'unkown task'
-            
-    # elif architecture == 'contract_dfa_state':
-    #     # 3.) DFA STATE NETWORK USING ONE-HOT
-    #     # Model=merged model; Processor=contract processor
-    #     processor = stateful_contract_processor.ContractProcessorWithState(
-    #         reg_ex = contract,
-    #         mode = contract_mode,
-    #         log_root = log_prefix,
-    #         nb_actions = nb_actions,
-    #         enforce_contract = enforce_contract,
-    #     )
-    #     dfa_input_shape = (
-    #         WINDOW_LENGTH,
-    #         processor.get_num_states(),
-    #     )
-    #     model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, dfa_input_shape)
-
-    # elif architecture == 'contract_graph_emb':
-    #     # 4.) DFA STATE USING NODE2VEC
-    #     # Model=graph embedding model; Processor=contract processor
-    #     if emb is not None:
-    #         emb = pd.read_csv(emb, header=-1, index_col=0, skiprows=1, delimiter=' ')
-    #     processor = graph_emb_processor.DFAGraphEmbeddingProcessor(
-    #         reg_ex = contract,
-    #         mode = contract_mode,
-    #         log_root = log_prefix,
-    #         nb_actions = nb_actions,
-    #         enforce_contract = enforce_contract,
-    #         emb = emb
-    #     )
-    #     model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, (WINDOW_LENGTH, emb.shape[1], )
-    #     )
-    # if architecture == 'contract':
-    #     # 1.) BASELINE WITH 0 AUGMENTATION (NO STATE NETWORK)
-    #     # Model=default atari model; Processor=contract processor
-    #     processor = contract_processor.ContractProcessor(
-    #         reg_ex = contract,
-    #         mode = contract_mode,
-    #         log_root = log_prefix,
-    #         nb_actions = nb_actions,
-    #         enforce_contract = enforce_contract
-    #     )
-    #     model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
-
-    # elif architecture == 'contract_action_history':
-    #     # 2.) BASELINE WITH CONSTANT ACTION HISTORY NETWORK
-    #     # Model=merged model; Processor=contract processor
-    #     ACTION_HISTORY_SIZE = 10
-    #     processor = action_history_contract_processor.ContractProcessorWithActionHistory(
-    #         reg_ex = contract,
-    #         mode = contract_mode,
-    #         log_root = log_prefix,
-    #         nb_actions = nb_actions,
-    #         enforce_contract = enforce_contract,
-    #         action_history_size = ACTION_HISTORY_SIZE
-    #     )
-    #     dfa_input_shape = (
-    #         ACTION_HISTORY_SIZE,
-    #         nb_actions,
-    #     )
-    #     model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, dfa_input_shape)
+    dqn_model.test(env, nb_episodes=100, visualize=False, nb_max_start_steps=100, callbacks=callbacks)
