@@ -13,7 +13,7 @@ from keras.callbacks import Callback, ModelCheckpoint
 from keras.layers import Dense, Dropout
 from keras.models import Model, Sequential
 from keras.optimizers import SGD
-from keras.preprocessing.image import ImageDataGenerator
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
 from matplotlib.pyplot import imshow
 from PIL import Image
 from sklearn.metrics import classification_report, confusion_matrix
@@ -83,20 +83,14 @@ def build_dataset(base_path=None):
             img = np.array(img).astype(np.float32)
             img = img / 255.
             # Make Lazy Frame stack of 4 frames
-            # img = np.repeat(img[:, :, np.newaxis], 4, axis=2)
             label_to_append = label_map_dict[class_name]
             if label_to_append is None:
                 raise ValueError("Expected a label for {} got None.".format(class_name))
             label_list.append(label_map_dict.get(class_name))
             image_list.append(img)
             image_paths.append(image_path)
-    # images = np.array(image_list)
-    # images = np.reshape(images, (-1, 4, 84, 84))
     labels = np.array(label_list)
     class_weights = dict(enumerate(class_weight.compute_class_weight('balanced', classes=np.unique(labels), y=labels)))
-    # print("Shape of images: {}".format(images.shape))
-    # print("Shape of labels: {}".format(labels.shape))
-    # return images, labels, len(directories), class_weights
     return image_list, label_list, len(directories), class_weights
 
 def batch_generator(X, Y, batch_size = BATCH_SIZE, train=False):
@@ -148,34 +142,30 @@ def build_diver_network(base_weights=None, num_classes=None):
 image_paths = []
 base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\frames"
 images, labels, num_classes, class_weights = build_dataset(base_name)
-# print("Dim images:{}".format(images.shape))
-# print("Null Values:{}".format(np.argwhere(np.isnan(images))))
-# indices = np.arange(images.shape[0])
 indices = np.arange(len(images))
 (trainX, testX, trainY, testY, _, test_indices) = train_test_split(images,
 	labels, indices, test_size=0.25, stratify=labels)
 print(trainX[0].shape)
 trainX, trainY = perform_augments(trainX, trainY, True)
 testX, testY = perform_augments(testX, testY, False)
-# augment_training_instances(trainX)
 print("Class Weights: {}".format(class_weights))
 weights_location = "weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=off-ns=5000000-seed=64251_weights.h5f"
 new_model = build_diver_network(weights_location, num_classes)
-opt = SGD(learning_rate=0.005, nesterov=True)
+opt = SGD(learning_rate=0.01, nesterov=True)
 new_model.compile(optimizer=opt, loss=keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
 train_generator = batch_generator(trainX, trainY, train=True)
 valid_generator = batch_generator(testX, testY)
-# h = new_model.fit(x=trainX, y=trainY, batch_size=128, epochs=10, validation_data=(testX, testY))
 EPOCHS = 400
-file_name = 'diver_locator_weights_dropout_{}.h5'.format(EPOCHS)
+file_name = 'diver_locator_weights_dropout_{}_augmented.h5'.format(EPOCHS)
 model_checkpointer = ModelCheckpoint(file_name, monitor='val_accuracy', save_best_only=True, save_weights_only=True, verbose=1)
+plateau_lr = ReduceLROnPlateau(monitor='val_accuracy', mode='max', min_lr=0.001, factor=0.9, verbose=1)
 history = new_model.fit_generator(train_generator,
                             steps_per_epoch= (BATCH_SIZE**2)//BATCH_SIZE,
                             epochs=EPOCHS,
                             class_weight=class_weights,
                             validation_data=valid_generator,
                             validation_steps= (BATCH_SIZE**2) // BATCH_SIZE,
-                            callbacks=[model_checkpointer])
+                            callbacks=[model_checkpointer, plateau_lr])
 print("Highest Accuracy: {}\n".format(max(history.history['accuracy'])))
 print("Highest Validation Accuracy: {}\n".format(max(history.history['val_accuracy'])))
 plt.plot(history.history['accuracy'])
@@ -208,6 +198,3 @@ for index in incorrects:
 cm = confusion_matrix(testY, y_pred, labels=[0,1,2,3,4])
 plot_confusion_matrix(cm=cm, classes=["no_divers", "up_left", "down_left", "up_right", "down_right"], normalize=True)
 plt.show()
-# print('Classification Report')
-# target_names = list(labels)
-# print(classification_report(valid_generator.classes, y_pred, target_names=target_names))
