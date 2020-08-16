@@ -161,7 +161,7 @@ valid_generator = batch_generator(testX, testY)
 EPOCHS = 3000
 file_name = 'diver_locator_weights_dropout_{}.h5'.format(EPOCHS)
 model_checkpointer = ModelCheckpoint(file_name, monitor='val_accuracy', save_best_only=True, save_weights_only=True, verbose=1)
-plateau_lr = ReduceLROnPlateau(min_lr=0.001, verbose=1)
+plateau_lr = ReduceLROnPlateau(monitor='val_accuracy', mode='max', min_lr=0.001, factor=0.9, verbose=1)
 history = new_model.fit_generator(train_generator,
                             steps_per_epoch= (BATCH_SIZE**2)//BATCH_SIZE,
                             epochs=EPOCHS,
