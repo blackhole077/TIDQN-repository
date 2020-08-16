@@ -19,13 +19,6 @@ class RajagopalProcessor(rl.core.Processor):
         self.testing = testing
 
     def process_observation(self, observation):
-        # Observation itself should be an RGB image of shape (210, 160, 3)
-        # print("Conditional Matrix: {}".format(self.cond_matrix))
-        # print("Length of Observation: {}\n".format(len(observation)))
-        # print("Length of Observation(0): {}\n".format(observation[0].shape))
-        # print("Length of Observation(1): {}\n".format(observation[1].shape))
-        # print("Observation(0): {}\n".format(observation[0]))
-        # print("Observation(1): {}\n".format(observation[0]))
         # NOTE: Might be better to check if it's an instance of tuple instead
         if len(observation) == 2:
             # This observation has already been processed. No need to do more.
@@ -44,9 +37,6 @@ class RajagopalProcessor(rl.core.Processor):
             assert processed_observation.shape == INPUT_SHAPE
             # Set data type to uint8
             processed_observation.astype('uint8')
-        # print("Shape of processed obs: {}\n".format(processed_observation.shape))
-        # num_divers_array = []
-        # diver_flags = np.zeros(4,self.nb_conditional)
         threshold = 142.0 # The base value in the section of screen where the divers are.
         #4x4 kernels that are "center-of-mass" on each diver.
         #For each frame in the LazyFrame stack (4 total), count the number of divers.
@@ -84,8 +74,6 @@ class RajagopalProcessor(rl.core.Processor):
             self.cond_matrix[2] = 1
         else:
             self.cond_matrix[2] = 0
-        # print("Shape of processed obs: {}".format(processed_observation.shape))
-        # print("Shape of cond_matrix: {}".format(self.cond_matrix))
         return processed_observation, self.cond_matrix  # saves storage in experience memory
 
     def process_reward(self, reward):
@@ -213,83 +201,33 @@ class RajagopalProcessor(rl.core.Processor):
         """
             Process a state batch (with augmentations).
 
+            Batch comes in with shape (1,4,2)
+            which is 1 batch of (4,2) instances
+            So it seems this is a little more complex.
+            batch[0][0] gives you the first tuple of the lazy frame (so [0][n] will give each of the four images)
+            batch[0][0][0] gives you the first IMAGE of the first lazy frame stack
+            batch[0][0][1] gives you the condition matrix (see above)
         """
         #The image section of the batch
         batch_images = []
         #The augmentation section of the batch
         batch_augmentation = []
-
         for b in batch:
             b_images = b[:, 0]
-            # print("b_images: {}\n".format(b_images))
-            # print("b_images shape: {}\n".format(b_images.shape))
             b_images = np.array(b_images.tolist())
-            # print("AFTER NP.ARRAY CALL\n")
-            # print("b_images: {}\n".format(b_images))
-            # print("b_images shape: {}\n".format(b_images.shape))
             #Apply the transformation needed by DQN
             b_images = b_images.astype('float32') / 255.
-            # print("AFTER ASTYPE CALL\n")
-            # print("b_images: {}\n".format(b_images))
 
             #Append it back to batch_images
             batch_images += [b_images]
 
             #Augmentation section
             b_augmentations = b[:, 1]
-            # print("b_augmentations: {}\n".format(b_augmentations))
-            # print("b_augmentations shape: {}\n".format(b_augmentations.shape))
             b_augmentations = np.array(b_augmentations.tolist())
-            # print("AFTER NP.ARRAY CALL\n")
-            # print("b_augmentations: {}\n".format(b_augmentations))
-            # print("b_augmentations shape: {}\n".format(b_augmentations.shape))
             temp = []
             for bb in b_augmentations:
                 temp += [bb.flatten()]
-                # print("TEMP: {}\n".format(temp))
             batch_augmentation += [temp]
         batch_images = np.array(batch_images)
         batch_augmentation = np.array(batch_augmentation)
-        # print("FINISHED FUNCTIONS\n\n\n")
         return [batch_images, batch_augmentation]
-
-    # def process_state_batch(self, batch):
-    #     """
-    #         Batch comes in with shape (1,4,2)
-    #         which is 1 batch of (4,2) instances
-    #         So it seems this is a little more complex.
-    #         batch[0][0] gives you the first tuple of the lazy frame (so [0][n] will give each of the four images)
-    #         batch[0][0][0] gives you the first IMAGE of the first lazy frame stack
-    #         batch[0][0][1] gives you the condition matrix (see above)
-    #     """
-    #     print("Batch type: {}\n".format(type(batch)))
-    #     print("Batch shape {}\n".format(batch.shape))
-    #     print("Batch: {}\n".format(batch))
-    #     print("Batch 1: {}\n".format(batch[0]))
-    #     print("Batch 1 shape: {}\n".format(batch[0].shape))
-    #     print("Batch 1.1: {}\n".format(batch[0][0]))
-    #     print("Batch 1.1 shape: {}\n".format(batch[0][0].shape))
-    #     #The image
-    #     print("Batch 1.1.1: {}\n".format(batch[0][0][0]))
-    #     print("Batch 1.1.1 shape: {}\n".format(batch[0][0][0].shape))
-    #     #The conditional matrix
-    #     print("Batch 1.1.2: {}\n".format(batch[0][0][1]))
-    #     print("Batch 1.1.2 shape: {}\n".format(batch[0][0][1].shape))
-
-    #     for image in batch[0]:
-    #         print("Image dtype: {}\n".format(image[0].dtype))
-    #         image[0] = image[0].astype('float32') / 255.
-    #         print("Image shape {}\n".format(image.shape))
-    #         print("Image dtype: {}\n".format(image.dtype))
-    #         print("Image: {}\n".format(image))
-    #     print("VALIDATION STEP===================\n\n\n")
-    #     print("Batch shape {}\n".format(batch.shape))
-    #     for image in batch[0]:
-    #         print("Image dtype: {}\n".format(image[0].dtype))
-    #         # image[0] = image[0].astype('float32') / 255.
-    #         print("Image shape {}\n".format(image.shape))
-    #         print("Image: {}\n".format(image))
-    #     print("Batch: {}\n".format(batch))
-    #     print("Batch Data type: {}\n".format(type(batch)))
-
-    #     return batch

@@ -435,10 +435,6 @@ class RajagopalFileLogger(Callback):
         # Sort everything by episode.
         # Overwrite already open file. We can simply seek to the beginning since the file will
         # grow strictly monotonously.
-        for entry in self.info.items():
-            print("Entry is of type: {}\n".format(type(entry)))
-            for value in entry:
-                print("Value {} is of type {}\n".format(value, type(value)))
         with open(self.filepath, 'w') as f:
             json.dump(self.info, f)
 
