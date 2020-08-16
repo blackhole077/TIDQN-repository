@@ -95,7 +95,7 @@ def build_dataset(base_path=None):
             if label_to_append is None:
                 raise ValueError("Expected a label for {} got None.".format(class_name))
             label_list.append(label_map_dict.get(class_name))
-
+            image_paths.append(image_path)
             image_list.append(img)
     images = np.array(image_list)
     images = np.reshape(images, (-1, 4, 84, 84))
