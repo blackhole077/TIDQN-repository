@@ -1,0 +1,21 @@
+{
+    "file_extensions":[
+        ".jpg",
+        ".png",
+        ".tiff",
+        ".tif"
+    ],
+    "labels": [
+        "no_enemy",
+        "left",
+        "right",
+        "both"
+    ],
+    "resize": true,
+    "resize_height" : 512,
+    "resize_width": 512,
+    "frame_directory_root": "C:/Users/Jeevan Rajagopal/master-thesis-repository/",
+    "data_frame_location": "C:/Users/Jeevan Rajagopal/master-thesis-repository/labeling_dataframe.csv",
+    "multi_label_dataframe_location": "C:/Users/Jeevan Rajagopal/master-thesis-repository/multi_label_data.csv",
+    "is_multilabel": true
+}

@@ -66,7 +66,7 @@ class ImageGui:
         # So we can quit the window from within the functions
         self.master = master
         self.configuration = dict()
-        if isinstance(configuration_dict, dict):
+        if isinstance(configuration, dict):
             self.configuration.update(configuration)
         else:
             raise TypeError("Configuration expected to be dict. Got {}".format(type(configuration)))
@@ -96,7 +96,16 @@ class ImageGui:
         self.buttons = []
         # set image container to first image
         self.set_image(paths[self.index])
-        self.multi_label_data = []
+        if self.configuration.get('multi_label_dataframe_location') is None:
+            self.multi_label_data = []
+        else:
+            if os.path.exists(self.configuration.get('multi_label_dataframe_location')):
+                self.multi_label_data = pd.read_csv(self.configuration.get('multi_label_dataframe_location')).values.to_list()
+                self.index = len(self.multi_label_data)
+            else:
+                with open(self.configuration.get('multi_label_dataframe_location'), 'w') as fp: 
+                    pass
+                self.multi_label_data = []
         # Add progress label
         progress_string = "%d/%d" % (self.index+1, self.n_paths)
         self.progress_label = tk.Label(frame, text=progress_string, width=10)
@@ -115,9 +124,18 @@ class ImageGui:
             self.checkboxes = Checkbar(root, labels)
             self.checkboxes.grid(row=1, column=0, sticky='we')
             vote_button = tk.Button(frame, text="Submit", width=10, height=1, fg="blue", command=lambda: self.multi_label_vote(self.checkboxes))
-            vote_button.grid(row=1, column=0, sticky='we')
+            generate_button = tk.Button(frame, text="Generate", width=10, height=1, fg="blue", command=lambda: self.dataframe_to_csv(self.multi_label_data))
+            vote_button.grid(row=3, column=0, sticky='we')
+            generate_button.grid(row=3, column=1, sticky='we')
             self.buttons.append(tk.Button(frame, text="prev im", width=10, height=1, fg="green", command=self.move_prev_image))
             self.buttons.append(tk.Button(frame, text="next im", width=10, height=1, fg='green', command= self.move_next_image))
+            tk.Label(frame, text="go to #pic:").grid(row=1, column=0)
+
+            self.return_ = tk.IntVar() # return_-> self.index
+            self.return_entry = tk.Entry(frame, width=6, textvariable=self.return_)
+            self.return_entry.grid(row=1, column=1, sticky='we')
+            master.bind('<Return>', self.num_pic_type)
+
             for ll, button in enumerate(self.buttons):
                 button.grid(row=0, column=ll, sticky='we')
         else:
@@ -135,25 +153,25 @@ class ImageGui:
             for ll, button in enumerate(self.buttons):
                 button.grid(row=0, column=ll, sticky='we')
                 #frame.grid_columnconfigure(ll, weight=1)
-        #### added in version 2
-        # Place typing input in grid, in case the mode is 'copy'
-        if copy_or_move == 'copy':
-            tk.Label(frame, text="go to #pic:").grid(row=1, column=0)
+            #### added in version 2
+            # Place typing input in grid, in case the mode is 'copy'
+            if copy_or_move == 'copy':
+                tk.Label(frame, text="go to #pic:").grid(row=1, column=0)
 
-            self.return_ = tk.IntVar() # return_-> self.index
-            self.return_entry = tk.Entry(frame, width=6, textvariable=self.return_)
-            self.return_entry.grid(row=1, column=1, sticky='we')
-            master.bind('<Return>', self.num_pic_type)
-        ####
-        
+                self.return_ = tk.IntVar() # return_-> self.index
+                self.return_entry = tk.Entry(frame, width=6, textvariable=self.return_)
+                self.return_entry.grid(row=1, column=1, sticky='we')
+                master.bind('<Return>', self.num_pic_type)
+            ####
+            
+            # key bindings (so number pad can be used as shortcut)
+            # make it not work for 'copy', so there is no conflict between typing a picture to go to and choosing a label with a number-key
+            if copy_or_move == 'move':
+                for key in range(self.n_labels):
+                    master.bind(str(key+1), self.vote_key)
+
         # Place the image in grid
         self.image_panel.grid(row=2, column=0, columnspan=self.n_labels+1, sticky='we')
-
-        # key bindings (so number pad can be used as shortcut)
-        # make it not work for 'copy', so there is no conflict between typing a picture to go to and choosing a label with a number-key
-        if copy_or_move == 'move':
-            for key in range(self.n_labels):
-                master.bind(str(key+1), self.vote_key)
 
     def show_next_image(self):
         """
@@ -233,8 +251,14 @@ class ImageGui:
         data = [os.path.normpath(input_path), checkbox_values]
         for value in checkbox_values:
             data.append(value)
-        print(f"Appending Data {data}")
-        self.multi_label_data[self.index] = data
+        print(f"Appending Data {data} to index {self.index}")
+        try:
+            # If it's an index we've previously visited, modify directly
+            self.multi_label_data[self.index] = data
+        except IndexError:
+            # It's a new instance, append the data.
+            self.multi_label_data.append(data)
+        
         checkboxes.clear()
         self.show_next_image()
       
@@ -357,6 +381,10 @@ class ImageGui:
         df.loc[ind,'sorted_in_folder'] = output_path
         #####
 
+    def dataframe_to_csv(self, dataframe_data=None):
+        _column_names = ['file_name', 'label']
+        _column_names.append(self.labels)
+        _temp_data_frame = pd.DataFrame(dataframe_data, columns=_column_names)
 
 def make_folder(directory=None):
     """
@@ -409,12 +437,13 @@ if __name__ == "__main__":
         type=str
     )
     args = vars(parser.parse_args())
-    if args['directory'] is None:
-        args['directory'] = os.getcwd()
     if args['json_file'] is None:
         args['json_file'] = os.getcwd()
-
     configuration_dict = load_configuration(args['json_file'])
+    if args['directory'] is None:
+        args['directory'] = os.getcwd()
+    else:
+        args['directory'] = os.path.join(configuration_dict.get('frame_directory_root'), args['directory'])
     # Make folder for the new labels
     labels = configuration_dict.get('labels')
     for label in labels:
