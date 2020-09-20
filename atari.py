@@ -11,6 +11,7 @@ from keras.optimizers import Adam
 
 import models.atari_model as atari_model
 import models.merged_model as merged_model
+import models.diver_model as diver_model
 import processors.atari_processor as atari_processor
 import processors.rajagopal_processor as rajagopal_processor
 from callbacks.contract_callbacks import ContractLogger
@@ -42,14 +43,15 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
 
 def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
-    number_conditionals = 3
+    number_conditionals = 7
     if architecture == 'original':
         processor = atari_processor.AtariProcessor(testing=testing)
         model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
     elif architecture == 'rajagopal_processor':
         processor = rajagopal_processor.RajagopalProcessor(
             nb_conditional=number_conditionals,
-            testing=testing
+            testing=testing,
+            base_diver_reward=1.0
         )
         cond_input_shape = (WINDOW_LENGTH, number_conditionals)
         model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape)
@@ -98,12 +100,13 @@ def build_env(env_name, scenario):
 def generate_filename_prefix(atari_arguments=None, prefix_type=None):
     if atari_arguments is None:
         raise ValueError("No arguments provided.")
-    root = 'env={}-c={}-arc={}-mode={}-ns={}-seed={}'.format(atari_arguments.get("environment"),
+    root = 'env={}-c={}-arc={}-mode={}-ns={}-seed={}-r={}'.format(atari_arguments.get("environment"),
                                                             atari_arguments.get("contract"),
                                                             atari_arguments.get("architecture"),
                                                             atari_arguments.get("contract_mode"),
                                                             atari_arguments.get("steps"),
-                                                            atari_arguments.get("train_seed"))
+                                                            atari_arguments.get("train_seed"),
+                                                            atari_arguments.get("reward_signal"))
     if prefix_type == 'log':
         if atari_arguments.get("test_seed") is not None:
             root += '-test_seed=' + str(atari_arguments.get("test_seed"))

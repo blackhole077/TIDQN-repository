@@ -47,6 +47,11 @@ parser.add_argument('--steps',
                         By default, it will run for 10M steps.\
                         This is done for both training and testing.",
                     default=1000000)
+parser.add_argument('--reward',
+                    type=float,
+                    dest='reward_signal',
+                    help='How much reward will be set for rescuing a diver?',
+                    default=1.0)
 parser.add_argument('--enforce_contract',
                     type=bool,
                     dest='enforce_contract',
