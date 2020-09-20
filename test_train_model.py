@@ -39,7 +39,8 @@ BATCH_SIZE= 256
 def plot_confusion_matrix(cm, classes,
                         normalize=False,
                         title='Confusion matrix',
-                        cmap=plt.cm.get_cmap("Blues")):
+                        cmap=plt.cm.get_cmap("Blues"),
+                        file_name=None):
     """
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
@@ -68,6 +69,7 @@ def plot_confusion_matrix(cm, classes,
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
+    plt.savefig(file_name)
 
 def build_performance_report(model_history=None, file_name=None):
     print("Highest Accuracy: {}\n".format(max(model_history.history['accuracy'])))
@@ -81,7 +83,7 @@ def build_performance_report(model_history=None, file_name=None):
     plt.savefig(file_name)
     plt.show()
 
-def build_confusion_matrix(trained_model=None, testX=None, testY=None):
+def build_confusion_matrix(trained_model=None, testX=None, testY=None, image_paths=None, test_indices=None, label_dict=None, int_labels=None):
     test_generator = batch_generator(testX, testY, batch_size=len(testY))
     prediction_probabilities = trained_model.predict_generator(test_generator, 1)
     y_pred = np.argmax(prediction_probabilities, axis=1)
@@ -94,7 +96,7 @@ def build_confusion_matrix(trained_model=None, testX=None, testY=None):
     for index in incorrects:
         print("Index: {} Prediction {} True {}".format(test_indices[index], label_dict[y_pred[index]], label_dict[testY[index]]))
         print(image_paths[int(test_indices[index])])
-    return confusion_matrix(testY, y_pred, labels=[0,1,2,3,4])
+    return confusion_matrix(testY, y_pred, labels=int_labels)
 
 ### MODEL-RELATED FUNCTIONS ###
 
@@ -103,9 +105,9 @@ def build_dataset(base_path=None, label_map_dictionary=None):
     label_list = []
     image_paths = []
 
-    directories = [_dir for _dir in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, _dir))]
-    print("Directories: {}".format(directories))
-    for class_name in directories:
+    class_names = [_dir for _dir in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, _dir))]
+    print("Directories: {}".format(class_names))
+    for class_name in class_names:
         class_path = os.path.join(base_path, class_name)
         for image_name in os.listdir(class_path):
             image_path = os.path.join(class_path, image_name)
@@ -199,13 +201,13 @@ def _main(args):
         base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\diver_frames\\train"
     else:
         label_map_dict = {
-            "no_divers": 0,
-            "up_left": 1,
-            "down_left": 2,
-            "up_right": 3,
-            "down_right": 4
+            "no_enemy": 0,
+            "left": 1,
+            "right": 2
         }
-        base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\frames"
+        base_name = "C:\\Users\\Jeevan Rajagopal\\master-thesis-repository\\enemy_frames"
+    inv_label_map_dict = {v: k for k, v in label_map_dict.items()}
+    int_label_map_list = [i for i in range(len(inv_label_map_dict))]
     confusion_matrix_classes = list(label_map_dict.keys())
     nb_classes = len(confusion_matrix_classes)
     if base_weights == 'atari':
@@ -222,10 +224,10 @@ def _main(args):
     figure_file_name = f'diver_locator_{base_weights}_weights_{classification_type}_class_{EPOCHS}_epochs_{timestr}_figure_file.png'
     confusion_matrix_file_name = f'diver_locator_{base_weights}_weights_{classification_type}_class_{EPOCHS}_epochs_{timestr}_confustion_matrix.png'
     ### OPTIMIZER SECTION ###
-    opt = SGD(learning_rate=0.001, nesterov=True)
+    opt = SGD(learning_rate=0.0075, nesterov=True)
     ### CALLBACK SECTION ###
     model_checkpointer = ModelCheckpoint(weights_file_name, monitor='accuracy', save_best_only=True, save_weights_only=True, verbose=1)
-    stopper = EarlyStopping(monitor='accuracy', patience=50, mode='max', restore_best_weights=True)
+    stopper = EarlyStopping(monitor='accuracy', patience=(EPOCHS//8), mode='max', restore_best_weights=True)
     plateau_lr = ReduceLROnPlateau(monitor='val_accuracy', mode='max', min_lr=0.001, factor=0.5, verbose=1)
     # Compile the model
     diver_model.compile(optimizer=opt, loss=keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
@@ -252,10 +254,14 @@ def _main(args):
                                 class_weight=class_weights,
                                 validation_data=valid_generator,
                                 validation_steps= (BATCH_SIZE**2) // BATCH_SIZE,
-                                callbacks=[model_checkpointer, stopper])
+                                callbacks=[model_checkpointer, plateau_lr, stopper])
     ### EVALUATION SECTION ###
     build_performance_report(history, figure_file_name)
-    cm = build_confusion_matrix(new_model, testX, testY)
+    cm = build_confusion_matrix(diver_model, testX, testY, image_paths, test_indices, inv_label_map_dict, int_label_map_list)
+    plot_confusion_matrix(cm, classes=confusion_matrix_classes, normalize=True,
+    title=f'diver_locator_{base_weights}_weights_{classification_type}_class_{EPOCHS}_epochs',
+    file_name=confusion_matrix_file_name)
+
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument(
@@ -293,4 +299,12 @@ PARSER.add_argument(
     default=400,
     type=int
 )
+PARSER.add_argument(
+    '-t',
+    '--test',
+    dest='testing',
+    default=None,
+    type=str
+)
+
 _main(vars(PARSER.parse_args()))
