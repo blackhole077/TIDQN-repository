@@ -98,26 +98,17 @@ class RajagopalProcessor(rl.core.Processor):
         
         shaping_reward = 0.0
         # If we gain a diver, increase reward (If the first diver is picked up, reward is 1.5)
+        diver_change = np.sum(self.cond_matrix[:-1] - self.prev_step_cond_matrix[:-1])
+        oxygen_change = np.sum(self.cond_matrix[-1] - self.prev_step_cond_matrix[-1])
         # If a diver was picked up within the previous frame, add a reward signal.
-        if self.num_divers - self.prev_num_divers > 0:
-            if self.cond_matrix[0] == 1 and self.prev_step_cond_matrix[0] == 0:
-                shaping_reward += self.base_reward_diver
-            elif self.cond_matrix[1] == 1 and self.prev_step_cond_matrix[1] == 0:
-                shaping_reward += self.base_reward_diver
-            else:
-                shaping_reward += self.base_reward_diver
         # Don't increment for no increase/decrease
-        elif self.num_divers - self.prev_num_divers == 0:
-            shaping_reward += 0
         # If you lose a diver
+        if diver_change > 0:
+            shaping_reward += diver_change * self.base_reward_diver
+        elif diver_change < 0 and oxygen_change < 0:
+            shaping_reward += 0.0
         else:
-            # If the agent had at least one diver within the last frame, and then lost it
-            if self.cond_matrix[0] == 0 and self.prev_step_cond_matrix[0] == 1:
-                shaping_reward -= (2 * self.base_reward_diver)
-            elif self.cond_matrix[1] == 0 and self.prev_step_cond_matrix[1] == 1:
-                shaping_reward -= (2 * self.base_reward_diver)
-            else:
-                shaping_reward -= self.base_reward_diver
+            shaping_reward -= diver_change * (2 * self.base_reward_diver)
         # If the agent has picked up 6 divers, add a larger reward signal.
         if self.cond_matrix[5] == 1 and self.prev_step_cond_matrix[5] == 0:
             shaping_reward += (3 * self.base_reward_diver)
