@@ -108,7 +108,7 @@ class RajagopalProcessor(rl.core.Processor):
         elif diver_change < 0 and oxygen_change < 0:
             shaping_reward += 0.0
         else:
-            shaping_reward -= diver_change * (2 * self.base_reward_diver)
+            shaping_reward += diver_change * (2 * self.base_reward_diver)
         # If the agent has picked up 6 divers, add a larger reward signal.
         if self.cond_matrix[5] == 1 and self.prev_step_cond_matrix[5] == 0:
             shaping_reward += (3 * self.base_reward_diver)

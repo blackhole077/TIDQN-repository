@@ -41,7 +41,7 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
     return root
 
 
-def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
+def build_dqn(env_name, architecture, steps, nb_actions, dqn_arguments, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
     number_conditionals = 7
     if architecture == 'original':
@@ -51,7 +51,7 @@ def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
         processor = rajagopal_processor.RajagopalProcessor(
             nb_conditional=number_conditionals,
             testing=testing,
-            base_diver_reward=1.0
+            base_diver_reward=dqn_arguments.get('reward_signal')
         )
         cond_input_shape = (WINDOW_LENGTH, number_conditionals)
         model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape)
@@ -134,7 +134,7 @@ def train(atari_arguments=None):
     weights_location = os.path.join(atari_arguments.get("weights_directory"), generate_filename_prefix(atari_arguments, 'weight'))
 
     # Build the DQN model provided the parameters
-    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, testing=False)
+    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, atari_arguments, testing=False)
     
     # Define the callback functions
     callbacks = [FileLogger(log_location + '_information.json', 1), RajagopalFileLogger(log_location + '_info_dict_information.json', 1)]
@@ -167,7 +167,7 @@ def test(atari_arguments=None):
     # Determine the number of actions available to the agent
     nb_actions = env.action_space.n
     # Build the DQN model provided the parameters
-    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, testing=True)
+    dqn_model = build_dqn(atari_arguments.get("environment"), atari_arguments.get("architecture"), atari_arguments.get("steps"), nb_actions, atari_arguments, testing=True)
     # Load the saved weights
     dqn_model.load_weights(weights_location)
     # Define the callback functions
