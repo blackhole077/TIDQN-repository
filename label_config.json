@@ -6,10 +6,11 @@
         ".tif"
     ],
     "labels": [
-        "no_enemy",
-        "left",
-        "right",
-        "both"
+        "no_diver",
+        "up_left",
+        "down_left",
+        "up_right",
+        "down_right"
     ],
     "resize": true,
     "resize_height" : 512,

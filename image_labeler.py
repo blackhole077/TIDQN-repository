@@ -100,8 +100,13 @@ class ImageGui:
             self.multi_label_data = []
         else:
             if os.path.exists(self.configuration.get('multi_label_dataframe_location')):
-                self.multi_label_data = pd.read_csv(self.configuration.get('multi_label_dataframe_location')).values.to_list()
-                self.index = len(self.multi_label_data)
+                try:
+                    self.multi_label_data = pd.read_csv(self.configuration.get('multi_label_dataframe_location')).values.tolist()
+                    self.index = len(self.multi_label_data)
+                except pd.errors.EmptyDataError:
+                    with open(self.configuration.get('multi_label_dataframe_location'), 'w') as fp: 
+                        pass
+                    self.multi_label_data = []
             else:
                 with open(self.configuration.get('multi_label_dataframe_location'), 'w') as fp: 
                     pass
@@ -383,8 +388,10 @@ class ImageGui:
 
     def dataframe_to_csv(self, dataframe_data=None):
         _column_names = ['file_name', 'label']
-        _column_names.append(self.labels)
+        _column_names.extend(self.labels)
         _temp_data_frame = pd.DataFrame(dataframe_data, columns=_column_names)
+        _temp_data_frame.to_csv(self.configuration.get('multi_label_dataframe_location'), index=False)
+        
 
 def make_folder(directory=None):
     """
