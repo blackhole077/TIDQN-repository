@@ -103,6 +103,8 @@ class ImageGui:
                 try:
                     self.multi_label_data = pd.read_csv(self.configuration.get('multi_label_dataframe_location')).values.tolist()
                     self.index = len(self.multi_label_data)
+                    print(f"Index was left at {self.index}")
+                    self.set_image(paths[self.index])
                 except pd.errors.EmptyDataError:
                     with open(self.configuration.get('multi_label_dataframe_location'), 'w') as fp: 
                         pass
@@ -256,7 +258,8 @@ class ImageGui:
         data = [os.path.normpath(input_path), checkbox_values]
         for value in checkbox_values:
             data.append(value)
-        print(f"Appending Data {data} to index {self.index}")
+        pretty_data = [f"{os.path.basename(input_path)}", checkbox_values]
+        print(f"Appending Data {pretty_data} to index {self.index+1}")
         try:
             # If it's an index we've previously visited, modify directly
             self.multi_label_data[self.index] = data
