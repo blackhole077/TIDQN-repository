@@ -42,14 +42,15 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
 
 def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
-    number_conditionals = 3
+    number_conditionals = 4
     if architecture == 'original':
         processor = atari_processor.AtariProcessor(testing=testing)
         model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
     elif architecture == 'rajagopal_processor':
         processor = rajagopal_processor.RajagopalProcessor(
             nb_conditional=number_conditionals,
-            testing=testing
+            testing=testing,
+            diver_model=diver_model.diver_model(INPUT_SHAPE, WINDOW_LENGTH, "weights/diver_locator_weights_dropout_400_all_conv_trainable.h5")
         )
         cond_input_shape = (WINDOW_LENGTH, number_conditionals)
         model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape)
@@ -78,7 +79,6 @@ def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
         delta_clip=1.)
     dqn.compile(Adam(lr=.00025), metrics=['mae'])
     return dqn
-
 
 def build_env(env_name, scenario):
     """

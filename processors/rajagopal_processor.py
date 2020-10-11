@@ -8,16 +8,16 @@ INPUT_SHAPE = (84, 84)
 
 class RajagopalProcessor(rl.core.Processor):
 
-    def __init__(self, nb_conditional, testing):
+    def __init__(self, nb_conditional, testing, diver_model):
         self.cond_matrix = np.zeros(shape=(nb_conditional,))
         self.prev_step_cond_matrix = np.zeros(shape=(nb_conditional,))
         self.action_taken = None
-        self.prev_actions = []
         self.num_divers = 0
         self.prev_num_divers = 0
         self.shaping_reward = 0
         self.testing = testing
-
+        self.diver_locator = diver_model
+        self.diver_output = None
     def process_observation(self, observation):
         # NOTE: Might be better to check if it's an instance of tuple instead
         if len(observation) == 2:
@@ -74,6 +74,10 @@ class RajagopalProcessor(rl.core.Processor):
             self.cond_matrix[2] = 1
         else:
             self.cond_matrix[2] = 0
+
+        instance = generate_single_image_instance(processed_observation)
+        self.diver_output = fetch_feature_extractor_outputs(instance, self.diver_locator)
+
         return processed_observation, self.cond_matrix  # saves storage in experience memory
 
     def process_reward(self, reward):
@@ -84,11 +88,6 @@ class RajagopalProcessor(rl.core.Processor):
         # Returns
             Reward obtained by the environment processed
         """
-        up_actions = [2, 6, 7, 10, 14, 15]
-        down_actions = [5, 8, 9, 13, 16, 17]
-        dither_constraint_1 = [0,1,0,1]
-        dither_constraint_2 = [1,0,1,0]
-        
         shaping_reward = 0
         if self.num_divers - self.prev_num_divers > 0:
             shaping_reward += 0.75
@@ -107,10 +106,6 @@ class RajagopalProcessor(rl.core.Processor):
             if self.action_taken is not None:
                 if self.action_taken in up_actions:
                     shaping_reward += 0.3
-        # Punish unnecessary shooting.
-        # if self.action_taken is not None:
-        #     if self.action_taken > 10:
-        #         shaping_reward -= 0.15
         # Incentivize going to the surface
         if self.cond_matrix[2] == 1 and self.cond_matrix[0] == 1:
             if self.action_taken in up_actions:
@@ -121,10 +116,36 @@ class RajagopalProcessor(rl.core.Processor):
             if self.action_taken in up_actions:# Punish attempts to surface otherwise
                 shaping_reward -= 0.2
         
-        if self.prev_actions == dither_constraint_1 or self.prev_actions == dither_constraint_2:
-            shaping_reward -= 0.15
-        
-        
+        full_correct_reward = 0.00001
+        half_correct_reward = full_correct_reward / 2.
+        up_left_full = [7, 15]
+        up_left_half = [2, 4, 6, 9, 10, 12, 14, 17]
+
+        down_left_full = [9, 17]
+        down_left_half = [4, 5, 7, 8, 12, 13, 15, 16]
+
+        up_right_full = [6, 14]
+        up_right_half = [2, 3, 7, 8, 10, 11, 15, 16]
+
+        down_right_full = [8, 16]
+        down_right_half = [3, 5, 6, 9, 11, 13, 14, 17]
+        diver_quadrant_rewards = [[up_left_full, up_left_half],
+                                  [down_left_full, down_left_half],
+                                  [up_right_full, up_right_half],
+                                  [down_right_full, down_right_half]
+                                ]
+        #Will output value between [0, 4]
+        diver_quadrant = np.argmax(self.diver_output)
+        if diver_quadrant > 0:
+            if self.action_taken in diver_quadrant_rewards[(diver_quadrant-1)][0]:
+                shaping_reward += full_correct_reward
+            # elif self.action_taken in diver_quadrant_rewards[(diver_quadrant-1)][1]:
+            #     shaping_reward += half_correct_reward
+            else:
+                shaping_reward += 0.0
+        else:
+            shaping_reward += 0.0
+                
         # For logging purposes, take note of the shaping reward
         self.shaping_reward = shaping_reward
         if not self.testing:
@@ -184,16 +205,6 @@ class RajagopalProcessor(rl.core.Processor):
         return observation, action, reward, done
 
     def process_action(self, action, q_value):
-        up_actions = [2, 6, 7, 10, 14, 15]
-        down_actions = [5, 8, 9, 13, 16, 17]
-        if len(self.prev_actions) >= 4:
-            del self.prev_actions[0]
-        if action in up_actions:
-            self.prev_actions.append(0)
-        elif action in down_actions:
-            self.prev_actions.append(1)
-        else:
-            self.prev_actions.append(2)
         self.action_taken = action
         return action
 
@@ -231,3 +242,14 @@ class RajagopalProcessor(rl.core.Processor):
         batch_images = np.array(batch_images)
         batch_augmentation = np.array(batch_augmentation)
         return [batch_images, batch_augmentation]
+
+'''MISC. FUNCTIONS'''
+
+def generate_single_image_instance(processed_observation):
+    single_instance_image = np.expand_dims(np.repeat(processed_observation[:, :, np.newaxis], 4, axis=2), axis=0)
+    single_instance_image = np.reshape(single_instance_image, (-1, 4, 84, 84))
+    return single_instance_image
+
+def fetch_feature_extractor_outputs(instance, feature_extractor):
+    # Should give a softmax vector
+    return feature_extractor.predict(single_instance_image)
