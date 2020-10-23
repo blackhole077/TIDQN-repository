@@ -39,5 +39,5 @@ def merged_model(input_shape, window_length, nb_actions, second_input_shape):
     output = Dense(nb_actions, activation='linear')(merged)
 
     model = Model(inputs=[mdp_input, cond_matrix_input], outputs=output)
-    print(model.summary())
+    model.summary()
     return model
