@@ -11,6 +11,7 @@ from keras.optimizers import Adam
 
 import models.atari_model as atari_model
 import models.merged_model as merged_model
+import models.diver_model as diver_model
 import processors.atari_processor as atari_processor
 import processors.rajagopal_processor as rajagopal_processor
 from callbacks.contract_callbacks import ContractLogger
@@ -42,7 +43,7 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
 
 def build_dqn(env_name, architecture, steps, nb_actions, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
-    number_conditionals = 4
+    number_conditionals = 7
     if architecture == 'original':
         processor = atari_processor.AtariProcessor(testing=testing)
         model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
@@ -157,7 +158,7 @@ def test(atari_arguments=None):
     # Build the environment specified by the user.
     env = build_env(atari_arguments.get("environment"), atari_arguments.get("doom_scenario"))
     # Start up a Monitor that will record videos of the gameplay for empirical analysis.
-    env = wrappers.Monitor(env, log_location + '_video_test')
+    env = wrappers.Monitor(env, log_location + '_video_test', video_callable=lambda episode_id: True)
     # Seed the random number generator (RNG) for both Numpy and the environment
     np.random.seed(atari_arguments.get("test_seed"))
     env.seed(atari_arguments.get("test_seed"))
