@@ -15,9 +15,18 @@ class RajagopalProcessor(rl.core.Processor):
         self.num_divers = 0
         self.prev_num_divers = 0
         self.shaping_reward = 0
-        self.testing = testing
+        self.total_divers = 0
+        self.num_lives = None
+        self.prev_num_lives = None
         self.diver_locator = diver_model
         self.diver_output = None
+
+        ### BASE SHAPING SIGNALS ###
+        self.base_reward_diver = 1.0
+        self.oxygen_reward = 0.2
+        self.up_with_max_divers_reward = 0.3
+        ### TESTING SIGNAL ###
+        self.testing = testing
     def process_observation(self, observation):
         # NOTE: Might be better to check if it's an instance of tuple instead
         if len(observation) == 2:
@@ -60,20 +69,22 @@ class RajagopalProcessor(rl.core.Processor):
         self.prev_num_divers = self.num_divers
         self.num_divers = num_divers
         #Set the previous step conditional matrix equal to the current step before modifications.
-        self.prev_step_cond_matrix[0] = self.cond_matrix[0]
-        self.prev_step_cond_matrix[1] = self.cond_matrix[1]
-        if num_divers >= 1:
-            self.cond_matrix[0] = 1
-        else:
-            self.cond_matrix[0] = 0
-        if num_divers == 6:
-            self.cond_matrix[1] = 1
-        else:
-            self.cond_matrix[1] = 0
+        for index, value in enumerate(self.cond_matrix):
+            self.prev_step_cond_matrix[index] = value
+
+        #Shape of conditional matrix [>=1, >=2, >=3, >=4, >=5, ==6, o2]
+        #                               0   1    2    3    4    5   6
+        # Iterate of the number of possible non-zero diver counts [1, 6] and adjust the conditional matrix
+        for i in range(6):
+            if (i+1) <= self.num_divers:
+                self.cond_matrix[i] = 1
+            else:
+                self.cond_matrix[i] = 0
+
         if np.mean(oxygen_threshold_area) < oxygen_threshold:
-            self.cond_matrix[2] = 1
+            self.cond_matrix[-1] = 1
         else:
-            self.cond_matrix[2] = 0
+            self.cond_matrix[-1] = 0
 
         instance = generate_single_image_instance(processed_observation)
         self.diver_output = fetch_feature_extractor_outputs(instance, self.diver_locator)
@@ -88,34 +99,61 @@ class RajagopalProcessor(rl.core.Processor):
         # Returns
             Reward obtained by the environment processed
         """
-        shaping_reward = 0
-        if self.num_divers - self.prev_num_divers > 0:
-            shaping_reward += 0.75
-        # If a diver was picked up within the previous frame, add a reward signal.
-        if self.cond_matrix[0] == 1 and self.prev_step_cond_matrix[0] == 0:
-            shaping_reward += 0.75
+        up_actions = [2, 6, 7, 10, 14, 15]
+        shaping_reward = 0.0
+        # If we gain a diver, increase reward (If the first diver is picked up, reward is 1.5)
+        diver_delta = np.sum(self.cond_matrix[:-1] - self.prev_step_cond_matrix[:-1])
+        # If we've got the number of lives at the current time step and previous time step calculate the delta
+        if self.num_lives and self.prev_num_lives:
+            life_delta = self.num_lives - self.prev_num_lives
+        else:
+            # If we do not, assume the delta is 0 (no change)
+            life_delta = 0
+
+        if diver_delta > 1 or diver_delta < -1:
+            diver_change = 0
+        else:
+            diver_change = np.minimum(diver_delta, 1)
+        oxygen_change = np.sum(self.cond_matrix[-1] - self.prev_step_cond_matrix[-1])
+
+        # If a diver is picked up this frame (noted by positive delta value)
+        if diver_change > 0:
+            # Increment by one (safety against changes larger than one which should not happen)
+            self.total_divers += 1
+            # Locate which diver of six was picked up (+1 to account for 0-indexing)
+            diver_index = int(np.argwhere(self.cond_matrix[:-1] == 1)[-1]) + 1
+        # This condition should only hold if the agent surfaces and loses a diver as a result.
+        elif life_delta == 0 and diver_change < 0:
+            if oxygen_change > 0:
+                shaping_reward += 0
+            else:
+                # Placeholder value since there are more nuanced cases that need handling first
+                diver_index = int(np.argwhere(self.prev_step_cond_matrix[:-1] == 1)[-1]) + 1
+                shaping_reward += diver_change * diver_index * (self.base_reward_diver + 0.001)
+        # No (acutal) change in divers picked up
+        elif diver_change == 0:
+            diver_index = 0
+        else:
+            # Figure out which diver of six was lost to determine points taken
+            diver_index = int(np.argwhere(self.prev_step_cond_matrix[:-1] == 1)[-1]) + 1
+        # Add shaping reward equal to the base_diver_reward mulitplied by the index and the delta value
+        shaping_reward += diver_change * diver_index * self.base_reward_diver
         # If the agent has picked up 6 divers, add a larger reward signal.
-        if self.cond_matrix[1] == 1 and self.prev_step_cond_matrix[1] == 0:
-            shaping_reward += 3
+        if self.cond_matrix[5] == 1 and self.prev_step_cond_matrix[5] == 0:
+            shaping_reward += (3 * self.base_reward_diver)
         # Attempt to address if the submarine successfully sufraces with 6 divers.
-        if self.cond_matrix[1] == 0 and self.cond_matrix[0] == 0:
-            if self.prev_step_cond_matrix[1] == 1 and self.cond_matrix[0] == 1:
-                shaping_reward += 5
+        if self.cond_matrix[5] == 0 and self.cond_matrix[0] == 0:
+            if self.prev_step_cond_matrix[5] == 1 and self.cond_matrix[0] == 1:
+                shaping_reward += (5 * self.base_reward_diver)
         # Attempt to increase reward for taking an UP related action with 6 divers.
-        if self.cond_matrix[1] == 1:
+        if self.cond_matrix[5] == 1:
             if self.action_taken is not None:
                 if self.action_taken in up_actions:
-                    shaping_reward += 0.3
-        # Incentivize going to the surface
-        if self.cond_matrix[2] == 1 and self.cond_matrix[0] == 1:
-            if self.action_taken in up_actions:
-                shaping_reward += 0.2
-            else:
-                shaping_reward -= 0.1
-        else:
-            if self.action_taken in up_actions:# Punish attempts to surface otherwise
-                shaping_reward -= 0.2
-        
+                    shaping_reward += self.up_with_max_divers_reward
+        # Punish the agent for losing lives
+        if self.num_lives and self.prev_num_lives:
+            if (self.num_lives - self.prev_num_lives) < 0:
+                shaping_reward -= 1.0
         full_correct_reward = 0.00001
         half_correct_reward = full_correct_reward / 2.
         up_left_full = [7, 15]
@@ -252,4 +290,4 @@ def generate_single_image_instance(processed_observation):
 
 def fetch_feature_extractor_outputs(instance, feature_extractor):
     # Should give a softmax vector
-    return feature_extractor.predict(single_instance_image)
+    return feature_extractor.predict(instance)
