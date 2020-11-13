@@ -26,9 +26,13 @@ def option_heads_model(input_shape, window_length, nb_actions, num_heads=1, seco
     mdp_third_conv2d = Conv2D(
         64, (3, 3), activation='relu', strides=(1, 1), name='mdp_third_conv2d')(mdp_second_conv2d)
     mdp_flatten = Flatten(name='mdp_first_flatten')(mdp_third_conv2d)
+    if second_input_shape:
+        cond_matrix_input = Input(shape=second_input_shape, name='Conditional_Matrix_Input')
+    else:
+        cond_matrix_input = None
     ### OPTION HEADS ###
-    for _ in range(num_heads):
-        option_heads.append(option_head(mdp_flatten, nb_actions, second_input_shape))
+    for i in range(num_heads):
+        option_heads.append(option_head(mdp_flatten, nb_actions, i, cond_matrix_input, second_input_shape))
     # Creat the overall model (mdp_input -> LazyFrames, cond_matrix_input -> Conditional Matrix)
     if second_input_shape:
         model = Model(inputs=[mdp_input, cond_matrix_input], outputs=option_heads)
@@ -37,31 +41,18 @@ def option_heads_model(input_shape, window_length, nb_actions, num_heads=1, seco
     model.summary()
     return model
 
-def option_head(head_input, nb_actions, conditional_matrix_input_shape=None):
-    mdp_first_dense = Dense(512, activation='relu', name='mdp_first_dense')(head_input)
-    if conditional_matrix_input_shape:
-        conditional_matrix_input = Input(shape=conditional_matrix_input_shape, name='Conditional_Matrix_Input')
+def option_head(head_input, nb_actions, head_counter, conditional_matrix_input=None, conditional_matrix_input_shape=None):
+    mdp_first_dense = Dense(512, activation='relu', name=f'mdp_first_dense_{head_counter}')(head_input)
+    if conditional_matrix_input is not None:
         if np.array(conditional_matrix_input_shape).size == 1:
             merged = concatenate([mdp_first_dense, conditional_matrix_input], axis=1)
         elif np.array(conditional_matrix_input_shape).size > 1:
-            cond_matrix_flatten = Flatten(name='cond_matrix_flatten')(conditional_matrix_input)
+            cond_matrix_flatten = Flatten(name=f'cond_matrix_flatten_{head_counter}')(conditional_matrix_input)
             merged = concatenate([mdp_first_dense, cond_matrix_flatten], axis=1)
         else:
             assert False, 'Wrong second input dimension!'
-        output = Dense(nb_actions, activation='linear')(merged)
+        output = Dense(nb_actions, activation='linear', name=f'output_{head_counter}')(merged)
     else:
         # Regular Atari head
-        output = Dense(nb_actions, activation='linear')(mdp_first_dense)
+        output = Dense(nb_actions, activation='linear', name=f'output_{head_counter}')(mdp_first_dense)
     return output
-
-if __name__ == "__main__":
-    nb_actions = 18
-    INPUT_SHAPE = (84, 84)
-    WINDOW_LENGTH = 4
-    number_conditionals = 7
-    nb_actions = 18
-    num_heads = 1
-    cond_input_shape = (WINDOW_LENGTH, number_conditionals)
-    model = option_heads_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, num_heads, cond_input_shape)
-    for i,layer in enumerate(model.layers):
-        print(i,layer.name,layer.trainable)
