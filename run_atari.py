@@ -28,7 +28,7 @@ parser.add_argument('--doom_scenario',
 parser.add_argument('--arch',
                     type=str,
                     dest='architecture',
-                    choices=['original', 'rajagopal_processor'],
+                    choices=['original', 'rajagopal_processor', 'option_heads'],
                     help="Choose which architecture you wish to utilize.\
                         By default, 'original' (Vanilla DQN) is used.",
                     default='original')

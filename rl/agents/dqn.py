@@ -70,6 +70,7 @@ class AbstractDQNAgent(Agent):
     def compute_q_values(self, state):
         # print("STATE SHAPE:{}\n".format(state))
         q_values = self.compute_batch_q_values([state]).flatten()
+        # q_values should be an array containing self.nb_actions elements
         assert q_values.shape == (self.nb_actions,)
         return q_values
 
@@ -188,7 +189,6 @@ class BDQNAgent(AbstractDQNAgent):
             updates = get_soft_target_model_updates(self.target_model, self.model, self.target_model_update)
             optimizer = AdditionalUpdatesOptimizer(optimizer, updates)
 
-        # TODO: Change clipped_masked_error to do an iteration across all option heads and then a secondary mask for option heads
         def clipped_masked_error(args):
             y_true, y_pred, mask = args
             loss = huber_loss(y_true, y_pred, self.delta_clip)
@@ -337,9 +337,6 @@ class BDQNAgent(AbstractDQNAgent):
                 actions = np.argmax(q_values, axis=1)
                 assert actions.shape == (self.batch_size,)
 
-                # Now, estimate Q values using the target network but select the values with the
-                # highest Q value wrt to the online model (as computed above).
-                target_q_values = self.target_model.predict_on_batch(state1_batch)
                 assert target_q_values.shape == (self.batch_size, self.nb_actions)
                 q_batch = target_q_values[range(self.batch_size), actions]
             else:
@@ -359,7 +356,6 @@ class BDQNAgent(AbstractDQNAgent):
             dummy_targets_list = [np.zeros((self.batch_size))] * self.num_heads
             dummy_targets = np.zeros((self.batch_size,))
             targets = np.zeros((self.batch_size, self.nb_actions))
-            dummy_targets = np.zeros((self.batch_size,))
             masks = np.zeros((self.batch_size, self.nb_actions))
             # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target targets accordingly, but only for the affected output units (as given by action_batch).
             discounted_reward_batch = self.gamma * q_batch
@@ -540,15 +536,12 @@ class DQNAgent(AbstractDQNAgent):
         loss_out = Lambda(clipped_masked_error, output_shape=(1,), name='loss')([y_true, y_pred, mask])
         ins = [self.model.input] if type(self.model.input) is not list else self.model.input
         trainable_model = Model(inputs=ins + [y_true, mask], outputs=[loss_out, y_pred])
-        print(trainable_model.output_names)
         assert len(trainable_model.output_names) == 2
         combined_metrics = {trainable_model.output_names[1]: metrics}
-        print(combined_metrics)
         losses = [
             lambda y_true, y_pred: y_pred,  # loss is computed in Lambda layer
             lambda y_true, y_pred: K.zeros_like(y_pred),  # we only include this for the metrics
         ]
-        print(losses)
         trainable_model.compile(optimizer=optimizer, loss=losses, metrics=combined_metrics)
         self.trainable_model = trainable_model
 

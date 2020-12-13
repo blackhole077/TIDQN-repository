@@ -12,10 +12,11 @@ from keras.optimizers import Adam
 import models.atari_model as atari_model
 import models.merged_model as merged_model
 import models.diver_model as diver_model
+import models.option_heads_model as option_heads_model
 import processors.atari_processor as atari_processor
 import processors.rajagopal_processor as rajagopal_processor
 from callbacks.contract_callbacks import ContractLogger
-from rl.agents.dqn import DQNAgent
+from rl.agents.dqn import DQNAgent, BDQNAgent
 from rl.callbacks import FileLogger, RajagopalFileLogger
 from rl.memory import SequentialMemory
 from rl.policy import EpsGreedyQPolicy, LinearAnnealedPolicy
@@ -43,43 +44,76 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
 
 def build_dqn(env_name, architecture, steps, nb_actions, dqn_arguments, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
-    number_conditionals = 7
-    if architecture == 'original':
-        processor = atari_processor.AtariProcessor(testing=testing)
-        model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
-    elif architecture == 'rajagopal_processor':
+    number_conditionals = 8
+    if architecture == 'option_heads':
+        num_heads = 2
+        diver_weights = 'weights/diver_locator_weights.h5f'
+        diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
         processor = rajagopal_processor.RajagopalProcessor(
             nb_conditional=number_conditionals,
             testing=testing,
-            base_diver_reward=dqn_arguments.get('reward_signal')
+            base_diver_reward=dqn_arguments.get('reward_signal'),
+            diver_model=diver_locator
         )
         cond_input_shape = (WINDOW_LENGTH, number_conditionals)
-        model = merged_model.merged_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape)
+        memories = []
+        for _ in range(num_heads):
+            memories.append(SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH))
+        policy = LinearAnnealedPolicy(
+            EpsGreedyQPolicy(),
+            attr='eps',
+            value_max=1.,
+            value_min=.1,
+            value_test=.05,
+            nb_steps=steps)
+        model = option_heads_model.option_heads_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, num_heads, cond_input_shape)
+        dqn = BDQNAgent(model=model,nb_actions=nb_actions,num_heads=num_heads,policy=policy,memory=memories,processor=processor,nb_steps_warmup=20000,gamma=.99,target_model_update=10000,train_interval=4,delta_clip=1.)
+        dqn.compile(Adam(lr=.00025), metrics=['mae'])
+        return dqn
     else:
-        assert False, 'unknown architecture'
+        if architecture == 'original':
+            processor = atari_processor.AtariProcessor(testing=testing)
+            model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
+            # For the purpose of establishing a baseline, we load in a 20M step weight file
+            base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=None-ns=20000000-seed=140985-r=1.0_weights.h5f'
+            model.load_weights(base_weights, by_name=True, skip_mismatch=True)
+        elif architecture == 'rajagopal_processor':
+            diver_weights = 'weights/diver_locator_weights.h5f'
+            diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
+            processor = rajagopal_processor.RajagopalProcessor(
+                nb_conditional=number_conditionals,
+                testing=testing,
+                base_diver_reward=dqn_arguments.get('reward_signal'),
+                diver_model=diver_locator
+            )
+            cond_input_shape = (WINDOW_LENGTH, number_conditionals)
+            base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=None-ns=20000000-seed=140985-r=1.0_weights.h5f'
+            model = transfer_model.transfer_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape, base_weights)
+        else:
+            assert False, 'unknown architecture'
 
-    memory = SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH)
-    policy = LinearAnnealedPolicy(
-        EpsGreedyQPolicy(),
-        attr='eps',
-        value_max=1.,
-        value_min=.1,
-        value_test=.05,
-        nb_steps=steps)
+        memory = SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH)
+        policy = LinearAnnealedPolicy(
+            EpsGreedyQPolicy(),
+            attr='eps',
+            value_max=1.,
+            value_min=.1,
+            value_test=.05,
+            nb_steps=steps)
 
-    dqn = DQNAgent(
-        model=model,
-        nb_actions=nb_actions,
-        policy=policy,
-        memory=memory,
-        processor=processor,
-        nb_steps_warmup=50000,
-        gamma=.99,
-        target_model_update=10000,
-        train_interval=4,
-        delta_clip=1.)
-    dqn.compile(Adam(lr=.00025), metrics=['mae'])
-    return dqn
+        dqn = DQNAgent(
+            model=model,
+            nb_actions=nb_actions,
+            policy=policy,
+            memory=memory,
+            processor=processor,
+            nb_steps_warmup=50000,
+            gamma=.99,
+            target_model_update=10000,
+            train_interval=4,
+            delta_clip=1.)
+        dqn.compile(Adam(lr=.00025), metrics=['mae'])
+        return dqn
 
 
 def build_env(env_name, scenario):
