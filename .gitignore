@@ -75,6 +75,7 @@
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
+.vscode/settings.json
 
 ### VisualStudioCode Patch ###
 # Ignore all local history of files
@@ -115,3 +116,8 @@ rl/agents/__pycache__/
 slurmlogs/
 frames/
 videos/
+uknown/
+weights/
+*.h5
+*.h5f
+*.out
