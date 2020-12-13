@@ -33,12 +33,11 @@ def option_heads_model(input_shape, window_length, nb_actions, num_heads=1, seco
     ### OPTION HEADS ###
     for i in range(num_heads):
         option_heads.append(option_head(mdp_flatten, nb_actions, i, cond_matrix_input, second_input_shape))
-    # Creat the overall model (mdp_input -> LazyFrames, cond_matrix_input -> Conditional Matrix)
+    # Create the overall model (mdp_input -> LazyFrames, cond_matrix_input -> Conditional Matrix)
     if second_input_shape:
         model = Model(inputs=[mdp_input, cond_matrix_input], outputs=option_heads)
     else:
         model = Model(inputs=[mdp_input], outputs=option_heads)
-    model.summary()
     return model
 
 def option_head(head_input, nb_actions, head_counter, conditional_matrix_input=None, conditional_matrix_input_shape=None):

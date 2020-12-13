@@ -88,7 +88,18 @@ class AbstractDQNAgent(Agent):
 
 class BDQNAgent(AbstractDQNAgent):
     """
+        Create an Agent that uses the Bootstrapped DQN architecture.
 
+        This class represents the functionality shown in the paper
+        `Deep Exploration via Bootstrapped DQN` by Osband et al. (2016),
+        which utilizes a multi-head output approach to the exploration
+        problem present in Deep Reinforcement Learning.
+        
+        NOTE: This particular implementation, however, is used to
+        implement a modified version of this architecture, termed
+        'option heads', which was shown in the workshop paper
+        `Classifying Options for Deep Reinforcement Learning`
+        by Arulkumaran et al. (2017).
     """
 
     def __init__(self, model, num_heads, policy=None, test_policy=None, enable_double_dqn=True, enable_dueling_network=False,
@@ -105,6 +116,8 @@ class BDQNAgent(AbstractDQNAgent):
 
         # Parameters.
         self.num_heads = num_heads
+        self.option_heads = True
+        self.current_head = 0
         self.enable_double_dqn = enable_double_dqn
         self.enable_dueling_network = enable_dueling_network
         self.dueling_type = dueling_type
@@ -150,7 +163,7 @@ class BDQNAgent(AbstractDQNAgent):
         self._dfa_governor = dfa_governor
 
     def get_config(self):
-        config = super(DQNAgent, self).get_config()
+        config = super(BDQNAgent, self).get_config()
         config['enable_double_dqn'] = self.enable_double_dqn
         config['dueling_type'] = self.dueling_type
         config['enable_dueling_network'] = self.enable_dueling_network
@@ -231,12 +244,31 @@ class BDQNAgent(AbstractDQNAgent):
     def update_target_model_hard(self):
         self.target_model.set_weights(self.model.get_weights())
 
+    def compute_batch_q_values(self, state_batch):
+        batch = self.process_state_batch(state_batch)
+        # q_values is a list when num_heads is > 1
+        if self.num_heads > 1:
+            q_values = self.model.predict_on_batch(batch)[self.current_head]
+        else:
+            q_values = self.model.predict_on_batch(batch)
+        assert q_values.shape == (len(state_batch), self.nb_actions)
+        return q_values
+
+    def compute_q_values(self, state):
+        q_values = self.compute_batch_q_values([state]).flatten()
+        # q_values should be an array containing self.nb_actions elements
+        assert q_values.shape == (self.nb_actions,)
+        return q_values
+
     def forward(self, observation):
+        # Select which head is current
+        if self.processor is not None:
+            self.current_head = self.processor.current_head % self.num_heads
         # Select an action.
-        state = self.memory.get_recent_state(observation)
+        state = self.memory[self.current_head].get_recent_state(observation)
         q_values = self.compute_q_values(state)
         if self.training:
-            #This would change if cond_matrix tries to affect choice probabilities
+            # This would change if cond_matrix tries to affect choice probabilities
             action = self.policy.select_action(q_values=q_values)
         else:
             action = self.test_policy.select_action(q_values=q_values)
@@ -250,7 +282,7 @@ class BDQNAgent(AbstractDQNAgent):
         # Store most recent experience in memory.
         if self.step % self.memory_interval == 0:
             _obs, _act, _rew, _ter = self.processor.process_experience(self.recent_observation, self.recent_action, reward, terminal)
-            self.memory.append(_obs, _act, _rew, _ter, training=self.training)
+            self.memory[self.current_head].append(_obs, _act, _rew, _ter, training=self.training)
 
         metrics = [np.nan for _ in self.metrics_names]
         if not self.training:
@@ -260,7 +292,7 @@ class BDQNAgent(AbstractDQNAgent):
 
         # Train the network on a single stochastic batch.
         if self.step > self.nb_steps_warmup and self.step % self.train_interval == 0:
-            experiences = self.memory.sample(self.batch_size)
+            experiences = self.memory[self.current_head].sample(self.batch_size)
             assert len(experiences) == self.batch_size
 
             # Start by extracting the necessary parameters (we use a vectorized implementation).
@@ -290,7 +322,17 @@ class BDQNAgent(AbstractDQNAgent):
                 # According to the paper "Deep Reinforcement Learning with Double Q-learning"
                 # (van Hasselt et al., 2015), in Double DQN, the online network predicts the actions
                 # while the target network is used to estimate the Q value.
-                q_values = self.model.predict_on_batch(state1_batch)
+                if self.num_heads > 1:
+                    q_values = self.model.predict_on_batch(state1_batch)[self.current_head]
+                    # Now, estimate Q values using the target network but select the values with the
+                    # highest Q value wrt to the online model (as computed above).
+                    target_q_values = self.target_model.predict_on_batch(state1_batch)[self.current_head]
+                else:
+                    q_values = self.model.predict_on_batch(state1_batch)
+                    # Now, estimate Q values using the target network but select the values with the
+                    # highest Q value wrt to the online model (as computed above).
+                    target_q_values = self.target_model.predict_on_batch(state1_batch)
+
                 assert q_values.shape == (self.batch_size, self.nb_actions)
                 actions = np.argmax(q_values, axis=1)
                 assert actions.shape == (self.batch_size,)
@@ -304,17 +346,22 @@ class BDQNAgent(AbstractDQNAgent):
                 # Compute the q_values given state1, and extract the maximum for each sample in the batch.
                 # We perform this prediction on the target_model instead of the model for reasons
                 # outlined in Mnih (2015). In short: it makes the algorithm more stable.
-                target_q_values = self.target_model.predict_on_batch(state1_batch)
+                if self.num_heads > 1:
+                    target_q_values = self.target_model.predict_on_batch(state1_batch)[self.current_head]
+                else:
+                    target_q_values = self.target_model.predict_on_batch(state1_batch)
                 assert target_q_values.shape == (self.batch_size, self.nb_actions)
                 q_batch = np.max(target_q_values, axis=1).flatten()
             assert q_batch.shape == (self.batch_size,)
 
+            masks_list = [np.zeros((self.batch_size, self.nb_actions), dtype='float32')] * self.num_heads
+            targets_list = [np.zeros((self.batch_size, self.nb_actions), dtype='float32')] * self.num_heads
+            dummy_targets_list = [np.zeros((self.batch_size))] * self.num_heads
+            dummy_targets = np.zeros((self.batch_size,))
             targets = np.zeros((self.batch_size, self.nb_actions))
             dummy_targets = np.zeros((self.batch_size,))
             masks = np.zeros((self.batch_size, self.nb_actions))
-
-            # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target targets accordingly,
-            # but only for the affected output units (as given by action_batch).
+            # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target targets accordingly, but only for the affected output units (as given by action_batch).
             discounted_reward_batch = self.gamma * q_batch
             # Set discounted reward to zero for all states that were terminal.
             discounted_reward_batch *= terminal1_batch
@@ -324,14 +371,15 @@ class BDQNAgent(AbstractDQNAgent):
                 target[action] = R  # update action with estimated accumulated reward
                 dummy_targets[idx] = R
                 mask[action] = 1.  # enable loss for this specific action
-            targets = np.array(targets).astype('float32')
-            masks = np.array(masks).astype('float32')
+            targets_list[self.current_head] = np.array(targets).astype('float32')
+            masks_list[self.current_head] = np.array(masks).astype('float32')
+            dummy_targets_list[self.current_head] = dummy_targets
 
             # Finally, perform a single update on the entire batch. We use a dummy target since
             # the actual loss is computed in a Lambda layer that needs more complex input. However,
             # it is still useful to know the actual target to compute metrics properly.
             ins = [state0_batch] if type(self.model.input) is not list else state0_batch
-            metrics = self.trainable_model.train_on_batch(ins + [targets, masks], [dummy_targets, targets])
+            metrics = self.trainable_model.train_on_batch(ins + targets_list + masks_list, dummy_targets_list + targets_list)
             metrics = [metric for idx, metric in enumerate(metrics) if idx not in (1, 2)]  # throw away individual losses
             metrics += self.policy.metrics
             if self.processor is not None:
@@ -349,7 +397,7 @@ class BDQNAgent(AbstractDQNAgent):
     @property
     def metrics_names(self):
         # Throw away individual losses and replace output name since this is hidden from the user.
-        assert len(self.trainable_model.output_names) == 2
+        assert len(self.trainable_model.output_names) == 2 * self.num_heads
         dummy_output_name = self.trainable_model.output_names[1]
         model_metrics = [name for idx, name in enumerate(self.trainable_model.metrics_names) if idx not in (1, 2)]
         model_metrics = [name.replace(dummy_output_name + '_', '') for name in model_metrics]
