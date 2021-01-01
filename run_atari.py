@@ -56,6 +56,14 @@ parser.add_argument('--enforce_contract',
                     type=bool,
                     dest='enforce_contract',
                     default=False)
+parser.add_argument('--use_state_augmentation',
+                    dest='use_state_augmentation',
+                    action='store_true')
+
+parser.add_argument('--use_action_shaping',
+                    dest='use_action_shaping',
+                    action='store_true')
+
 
 # Logging-related arguments. Can be left as default.
 parser.add_argument('--log_root',
@@ -83,15 +91,4 @@ else:
 if args.get("task") =='train':
     atari.train(args)
 else:
-    # def test(env_name, contract, architecture, contract_mode, steps, train_seed, test_seed, emb, enforce_contract, doom_scenario):
     atari.test(args)
-#if args.task=='train':
-#    tasks = [train_task.TrainTask(env_name=args.env_name, contract=args.contract, steps=args.steps, architecture=arch, contract_mode=mode, train_seed=args.train_seed, enforce_contract=args.enforce_contract, doom_scenario=args.doom_scenario)]
-#else:
-#    tasks = [test_task.TestTask(env_name=args.env_name, contract=args.contract, steps=args.steps, architecture=arch, contract_mode=mode, train_seed=args.train_seed, test_seed=args.test_seed, enforce_contract=args.enforce_contract, doom_scenario=args.doom_scenario)]
-
-# luigi.build(tasks, local_scheduler=True)
-
-# python run_atari.py --task=train --env-name BreakoutDeterministic-v4 --contract dithering --arch contrac_dfa_state --train_seed 1 --enforce_contract True
-
-# python run_atari.py --task=train --env-name doom --contract dithering --arch contract_dfa_state --train_seed 1  --doom_scenario DoomCorridor-v0
