@@ -201,7 +201,7 @@ class RajagopalProcessor(rl.core.Processor):
         # Add shaping reward equal to the base_diver_reward multiplied by the index and the delta value
         shaping_reward += diver_delta * diver_index * self.base_reward_diver
         # Add a reward if the agent is moving closer to a diver (if one is present)
-        shaping_reward += self.determine_diver_movement_reward()
+        # shaping_reward += self.determine_diver_movement_reward()
         # Punish the agent for losing lives
         if life_delta < 0:
             shaping_reward -= 0.5
