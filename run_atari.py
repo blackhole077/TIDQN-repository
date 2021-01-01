@@ -56,6 +56,7 @@ parser.add_argument('--enforce_contract',
                     type=bool,
                     dest='enforce_contract',
                     default=False)
+
 parser.add_argument('--use_state_augmentation',
                     dest='use_state_augmentation',
                     action='store_true')
@@ -64,6 +65,9 @@ parser.add_argument('--use_action_shaping',
                     dest='use_action_shaping',
                     action='store_true')
 
+parser.add_argument('--use_aux_extractor',
+                    dest='use_aux_extractor',
+                    action='store_true')
 
 # Logging-related arguments. Can be left as default.
 parser.add_argument('--log_root',

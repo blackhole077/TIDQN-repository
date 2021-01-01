@@ -36,7 +36,7 @@ class RajagopalProcessor(rl.core.Processor):
             (no_divers, up_left, down_left, up_right, down_right).
     """
 
-    def __init__(self, nb_conditional, testing, base_diver_reward, diver_model, use_state_augmentation=True, use_action_shaping=False):
+    def __init__(self, nb_conditional, testing, base_diver_reward, diver_model=None, use_state_augmentation=True, use_action_shaping=False):
         self.num_cond = nb_conditional
         # The conditional matrix as of the current time-step
         self.cond_matrix = np.zeros(shape=(nb_conditional,))
@@ -60,10 +60,13 @@ class RajagopalProcessor(rl.core.Processor):
         self.up_with_max_divers_reward = 0.3
         ### DIVER LOCATOR INFO ###
         self.diver_model = diver_model
+        if self.diver_model is None:
+            self.diver_output = np.array([1, 0, 0, 0, 0])
+        else:
+            self.diver_output = np.zeros(shape=(5,))
+        self.prev_diver_output = self.diver_output
         self.location_action_mapping = self.generate_location_action_mapping()
         self.move_towards_diver_reward = 0.0001
-        self.diver_output = np.zeros(shape=(5,))
-        self.prev_diver_output = self.diver_output
         ### BDQN ARGUMENTS ###
         self.current_head = 0
         ### TESTING FLAG ###
@@ -149,7 +152,8 @@ class RajagopalProcessor(rl.core.Processor):
             self.cond_matrix[-2] = 0
         
         # Use the diver locator to determine where the divers are (if any)
-        self.predict_divers(processed_observation)
+        if self.diver_model:
+            self.predict_divers(processed_observation)
         if self.use_state_augmentation:
             return processed_observation, self.cond_matrix  # saves storage in experience memory
         else:
@@ -327,7 +331,7 @@ class RajagopalProcessor(rl.core.Processor):
         obs = np.reshape(processed_observation, (1, 1,) + processed_observation.shape)
         assert obs.shape == (1, 1, 84, 84)
         # Run a single image prediction and transform it to a list
-        diver_locations = np.squeeze(self.diver_model.predict(obs), axis=0)
+        diver_locations = np.squeeze(self.diver_model.predict(obs), axis=0).round()
         # Update the previous output before replacing current output
         self.prev_diver_output = self.diver_output
         # If none of the outputs were above the threshold (i.e., zero vector output), default to 'no_divers'
@@ -404,7 +408,7 @@ class RajagopalProcessor(rl.core.Processor):
         """
         
         # If the diver output has the 'no_divers' bit on, then ignore remaining bits and return 0.
-        if self.diver_output[0] == 1:
+        if self.diver_output[0] == 1 or np.all(self.diver_output == 0):
             return 0.0
         else:
             actions_to_reward = np.zeros(shape=(18,), dtype='float32')
@@ -432,7 +436,7 @@ class RajagopalProcessor(rl.core.Processor):
                 A shaping signal value for moving towards a quadrant that contains a diver.
         """
         # If the diver output has the 'no_divers' bit on, return a mask of all values.
-        if self.diver_output[0] == 1:
+        if self.diver_output[0] == 1 or np.all(self.diver_output == 0):
             return np.ones(shape=(18,), dtype='bool')
         else:
             diver_output = self.diver_output

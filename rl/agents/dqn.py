@@ -276,13 +276,7 @@ class BDQNAgent(AbstractDQNAgent):
                 action = self.policy.select_action(q_values=masked_q)
                 # If the Epsilon occurs and selects an action that isn't 'allowed' we redo the selection (but only using the pool of allowed choices)
                 if action not in allowed_actions:
-                    try:
-                        action = allowed_actions.item(np.random.randint(0, len(allowed_actions)))
-                    except:
-                        print(f"Selecting integer between 0 and {len(allowed_actions)} raised an exception.")
-                        print(f"masked_q: {masked_q}")
-                        print(f"Mask: {mask}")
-                        raise
+                    action = allowed_actions.item(np.random.randint(0, len(allowed_actions)))
             else:
                 action = self.policy.select_action(q_values=q_values)
         else:

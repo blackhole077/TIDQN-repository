@@ -60,10 +60,13 @@ class OptionHeadsProcessor(rl.core.Processor):
         self.up_with_max_divers_reward = 0.3
         ### DIVER LOCATOR INFO ###
         self.diver_model = diver_model
+        if self.diver_model is None:
+            self.diver_output = np.array([1, 0, 0, 0, 0])
+        else:
+            self.diver_output = np.zeros(shape=(5,))
+        self.prev_diver_output = self.diver_output
         self.location_action_mapping = self.generate_location_action_mapping()
         self.move_towards_diver_reward = 0.0001
-        self.diver_output = np.zeros(shape=(5,))
-        self.prev_diver_output = self.diver_output
         ### BDQN ARGUMENTS ###
         self.current_head = 0
         ### TESTING FLAG ###
@@ -449,7 +452,4 @@ class OptionHeadsProcessor(rl.core.Processor):
             diver_output = self.diver_output
         actions_to_reward = np.zeros(shape=(18,), dtype='float32')
         np.any((self.location_action_mapping * diver_output), axis=1, out=actions_to_reward)
-        if np.all(actions_to_reward == 0):
-            print(f"diver output: {diver_output}")
-            print(f"actions_to_reward: {actions_to_reward}")
         return actions_to_reward

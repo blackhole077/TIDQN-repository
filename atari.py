@@ -91,7 +91,10 @@ def build_dqn(env_name, architecture, steps, nb_actions, dqn_arguments, testing=
             # For the purpose of establishing a baseline, we load in a 20M step weight file
             model.load_weights(base_weights, by_name=True, skip_mismatch=True)
         elif architecture == 'rajagopal_processor':
-            diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
+            if dqn_arguments.get('use_aux_extractor'):
+                diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
+            else:
+                diver_locator = None
             processor = rajagopal_processor.RajagopalProcessor(
                 nb_conditional=number_conditionals,
                 testing=testing,
