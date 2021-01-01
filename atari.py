@@ -13,9 +13,11 @@ import models.atari_model as atari_model
 import models.merged_model as merged_model
 import models.diver_model as diver_model
 import models.option_heads_model as option_heads_model
+import models.transfer_model as transfer_model
 import processors.atari_processor as atari_processor
 import processors.rajagopal_processor as rajagopal_processor
-from callbacks.contract_callbacks import ContractLogger
+import processors.option_heads_processor as option_heads_processor
+from callbacks.contract_callbacks import RajagopalTestLogger
 from rl.agents.dqn import DQNAgent, BDQNAgent
 from rl.callbacks import FileLogger, RajagopalFileLogger
 from rl.memory import SequentialMemory
@@ -44,63 +46,70 @@ def filename_prefix_fn(env_name, contract, architecture, contract_mode, steps, t
 
 def build_dqn(env_name, architecture, steps, nb_actions, dqn_arguments, testing=False):
     print('ARCHITECTURE: {}'.format(architecture))
+    print(dqn_arguments)
     number_conditionals = 8
+    policy = LinearAnnealedPolicy(
+        EpsGreedyQPolicy(),
+        attr='eps',
+        value_max=1.,
+        value_min=.1,
+        value_test=.05,
+        nb_steps=steps)
+    diver_weights = 'weights/diver_locator_weights.h5f'
+    cond_input_shape = (WINDOW_LENGTH, number_conditionals)
+
     if architecture == 'option_heads':
         num_heads = 2
-        diver_weights = 'weights/diver_locator_weights.h5f'
         diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
-        processor = rajagopal_processor.RajagopalProcessor(
+        processor = option_heads_processor.OptionHeadsProcessor(
             nb_conditional=number_conditionals,
             testing=testing,
             base_diver_reward=dqn_arguments.get('reward_signal'),
-            diver_model=diver_locator
+            diver_model=diver_locator,
+            use_state_augmentation=dqn_arguments.get('use_state_augmentation'),
+            use_action_shaping=dqn_arguments.get('use_action_shaping')
         )
-        cond_input_shape = (WINDOW_LENGTH, number_conditionals)
         memories = []
         for _ in range(num_heads):
             memories.append(SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH))
-        policy = LinearAnnealedPolicy(
-            EpsGreedyQPolicy(),
-            attr='eps',
-            value_max=1.,
-            value_min=.1,
-            value_test=.05,
-            nb_steps=steps)
-        model = option_heads_model.option_heads_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, num_heads, cond_input_shape)
+        if dqn_arguments.get('use_state_augmentation'):
+            model = option_heads_model.option_heads_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, num_heads, cond_input_shape)
+        else:
+            print('ARCHITECTURE: {} (NO STATE AUGMENTATION)'.format(architecture))
+            model = option_heads_model.option_heads_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, num_heads)
+
+        # For the purpose of establishing a baseline, we load in a 20M step weight file
+        base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=option_heads-mode=None-ns=20000000-seed=140985-r=1.25_weights.h5f'
+        model.load_weights(base_weights, by_name=True, skip_mismatch=True)
         dqn = BDQNAgent(model=model,nb_actions=nb_actions,num_heads=num_heads,policy=policy,memory=memories,processor=processor,nb_steps_warmup=20000,gamma=.99,target_model_update=10000,train_interval=4,delta_clip=1.)
-        dqn.compile(Adam(lr=.00025), metrics=['mae'])
-        return dqn
     else:
+        memory = SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH)
+        base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=None-ns=20000000-seed=140985-r=1.0_weights.h5f'
         if architecture == 'original':
             processor = atari_processor.AtariProcessor(testing=testing)
             model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
             # For the purpose of establishing a baseline, we load in a 20M step weight file
-            base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=None-ns=20000000-seed=140985-r=1.0_weights.h5f'
             model.load_weights(base_weights, by_name=True, skip_mismatch=True)
         elif architecture == 'rajagopal_processor':
-            diver_weights = 'weights/diver_locator_weights.h5f'
             diver_locator = diver_model.diver_model(input_shape=INPUT_SHAPE, diver_weights=diver_weights)
             processor = rajagopal_processor.RajagopalProcessor(
                 nb_conditional=number_conditionals,
                 testing=testing,
                 base_diver_reward=dqn_arguments.get('reward_signal'),
-                diver_model=diver_locator
+                diver_model=diver_locator,
+                use_state_augmentation=dqn_arguments.get('use_state_augmentation'),
+                use_action_shaping=dqn_arguments.get('use_action_shaping')
             )
-            cond_input_shape = (WINDOW_LENGTH, number_conditionals)
-            base_weights = 'weights/env=SeaquestDeterministic-v4-c=None-arc=original-mode=None-ns=20000000-seed=140985-r=1.0_weights.h5f'
-            model = transfer_model.transfer_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape, base_weights)
+            if dqn_arguments.get('use_state_augmentation') == True:
+                model = transfer_model.transfer_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions, cond_input_shape, base_weights)
+            else:
+                print('ARCHITECTURE: {} (NO STATE AUGMENTATION)'.format(architecture))
+                model = atari_model.atari_model(INPUT_SHAPE, WINDOW_LENGTH, nb_actions)
+                model.load_weights(base_weights, by_name=True, skip_mismatch=True)
         else:
             assert False, 'unknown architecture'
-
-        memory = SequentialMemory(limit=1000000, window_length=WINDOW_LENGTH)
-        policy = LinearAnnealedPolicy(
-            EpsGreedyQPolicy(),
-            attr='eps',
-            value_max=1.,
-            value_min=.1,
-            value_test=.05,
-            nb_steps=steps)
-
+            
+        # Instantiate a DQN Agent
         dqn = DQNAgent(
             model=model,
             nb_actions=nb_actions,
@@ -112,9 +121,8 @@ def build_dqn(env_name, architecture, steps, nb_actions, dqn_arguments, testing=
             target_model_update=10000,
             train_interval=4,
             delta_clip=1.)
-        dqn.compile(Adam(lr=.00025), metrics=['mae'])
-        return dqn
-
+    dqn.compile(Adam(lr=.00025), metrics=['mae'])
+    return dqn
 
 def build_env(env_name, scenario):
     """
@@ -194,7 +202,7 @@ def test(atari_arguments=None):
     # Build the environment specified by the user.
     env = build_env(atari_arguments.get("environment"), atari_arguments.get("doom_scenario"))
     # Start up a Monitor that will record videos of the gameplay for empirical analysis.
-    env = wrappers.Monitor(env, log_location + '_video_test')
+    env = wrappers.Monitor(env, log_location + '_video_test', force=True, video_callable=lambda episode_id: True)
     # Seed the random number generator (RNG) for both Numpy and the environment
     np.random.seed(atari_arguments.get("test_seed"))
     env.seed(atari_arguments.get("test_seed"))
@@ -205,6 +213,6 @@ def test(atari_arguments=None):
     # Load the saved weights
     dqn_model.load_weights(weights_location)
     # Define the callback functions
-    callbacks = [ContractLogger(log_location + '_callback_test.csv')]
+    callbacks = [RajagopalTestLogger(log_location + '_callback_test.json')]
 
     dqn_model.test(env, nb_episodes=100, visualize=False, nb_max_start_steps=100, callbacks=callbacks)

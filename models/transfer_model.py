@@ -3,7 +3,7 @@ import numpy as np
 from keras.layers import Conv2D, Dense, Flatten, Input, Permute, concatenate
 from keras.models import Model
 
-def transfer_merged_model(input_shape, window_length, nb_actions, second_input_shape, model_weights):
+def transfer_model(input_shape, window_length, nb_actions, second_input_shape, model_weights):
     mdp_shape = (window_length, ) + input_shape
     mdp_input = Input(shape=mdp_shape, name='MDP')
     if K.image_data_format() == 'channels_last':

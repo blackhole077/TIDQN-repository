@@ -268,8 +268,23 @@ class BDQNAgent(AbstractDQNAgent):
         state = self.memory[self.current_head].get_recent_state(observation)
         q_values = self.compute_q_values(state)
         if self.training:
-            # This would change if cond_matrix tries to affect choice probabilities
-            action = self.policy.select_action(q_values=q_values)
+            if self.processor is not None and self.processor.use_action_shaping:
+                mask = self.processor.determine_action_shaping()
+                masked_q = q_values * mask
+                allowed_actions = np.argwhere(masked_q != 0)
+                # Attempt to use the Epsilon-Greedy policy to select an action
+                action = self.policy.select_action(q_values=masked_q)
+                # If the Epsilon occurs and selects an action that isn't 'allowed' we redo the selection (but only using the pool of allowed choices)
+                if action not in allowed_actions:
+                    try:
+                        action = allowed_actions.item(np.random.randint(0, len(allowed_actions)))
+                    except:
+                        print(f"Selecting integer between 0 and {len(allowed_actions)} raised an exception.")
+                        print(f"masked_q: {masked_q}")
+                        print(f"Mask: {mask}")
+                        raise
+            else:
+                action = self.policy.select_action(q_values=q_values)
         else:
             action = self.test_policy.select_action(q_values=q_values)
         # Book-keeping.

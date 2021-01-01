@@ -1,6 +1,74 @@
 from rl.callbacks import Callback
 import numpy as np
 import timeit
+import json
+
+class RajagopalTestLogger(Callback):
+    def __init__(self, filepath, interval=1):
+        self.filepath = filepath
+        self.interval = interval
+        # Some algorithms compute multiple episodes at once since they are multi-threaded.
+        # We therefore use a dict that maps from episode to metrics array.
+        self.episodes = {}
+
+    def on_train_begin(self, logs):
+        pass
+    def on_train_end(self, logs):
+        """ Save model at the end of training """
+        self.save_data()
+
+    def on_episode_begin(self, episode, logs):
+        """Called at beginning of each episode"""
+        self.episodes[episode] = dict()
+        self.episodes[episode]['actions'] = []
+        self.episodes[episode]['info'] = []
+        self._action_list = []
+        self._info_list = []
+    
+    def on_episode_end(self, episode, logs):
+        if episode % self.interval == 0:
+            logs['total_divers_for_episode'] = self._info_list[-1].get('total_divers')
+            logs['max_divers_for_episode'] = self._info_list[-1].get('max_divers_for_episode')
+            self.episodes[episode]['logs'] = logs
+            self.episodes[episode]['actions'] = self._action_list
+            self.episodes[episode]['info'] = self._info_list
+            self.save_data()
+
+    def on_step_begin(self, step, logs):
+        pass
+
+    def on_step_end(self, step, logs):
+        """
+            Append metric at the end of each step
+
+            Parameters
+            ----------
+            step : 
+
+            logs : dict
+                Contains the following:
+                - action (what action was taken)
+                - observation
+                - reward
+                - info
+        """
+        for key in logs['info']:
+            logs['info'][key] = np.asscalar(logs['info'][key])
+        self._info_list += [logs['info']]
+        
+    def on_action_begin(self, action, logs):
+        """Called at beginning of each action"""
+        self._action_list.append(int(action))
+
+    def save_data(self):
+        """ Save metrics in a json file """
+        if len(self.episodes.keys()) == 0:
+            return
+        # Sort everything by episode.
+        # Overwrite already open file. We can simply seek to the beginning since the file will
+        # grow strictly monotonously.
+        with open(self.filepath, 'w') as f:
+            json.dump(self.episodes, f)
 
 class ContractLogger(Callback):
     def __init__(self, filename, interval=1):

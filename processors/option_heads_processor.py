@@ -7,7 +7,7 @@ from PIL import Image
 
 INPUT_SHAPE = (84, 84)
 
-class RajagopalProcessor(rl.core.Processor):
+class OptionHeadsProcessor(rl.core.Processor):
     """
         An experimental processor that incorporates domain knowledge into the agent's behavior.
 
@@ -75,6 +75,7 @@ class RajagopalProcessor(rl.core.Processor):
         ### LOGGING ONLY ###
         self.total_divers = 0
         self.max_diver_count = 0
+
 
     def process_observation(self, observation):
         """
@@ -197,17 +198,22 @@ class RajagopalProcessor(rl.core.Processor):
         # Add shaping reward equal to the base_diver_reward multiplied by the index and the delta value
         shaping_reward += diver_delta * diver_index * self.base_reward_diver
         # Add a reward if the agent is moving closer to a diver (if one is present)
-        shaping_reward += self.determine_diver_movement_reward()
+        # shaping_reward += self.determine_diver_movement_reward()
         # Punish the agent for losing lives
         if life_delta < 0:
             shaping_reward -= 0.5
 
         # For logging purposes, take note of the shaping reward
         self.shaping_reward = shaping_reward
-        if not self.testing:
-            return np.clip(reward, -1., 1.) + shaping_reward
-        else:
+        # If the default head is used, just treat it like the base Atari DQN.
+        if self.current_head == 0:
+            self.shaping_reward = 0.0
             return np.clip(reward, -1., 1.)
+        else:
+            if not self.testing:
+                return np.clip(reward, -1., 1.) + shaping_reward
+            else:
+                return np.clip(reward, -1., 1.)
 
     def process_info(self, info):
         """Processes the info as obtained from the environment for use in an agent and
@@ -261,6 +267,9 @@ class RajagopalProcessor(rl.core.Processor):
 
         # Observation is a tuple of length 2 (that's why the check exists!)
         observation = self.process_observation(observation)
+        # If the episode has ended during training, increment the current head
+        if done and not self.testing:
+            self.current_head += 1
         return observation, action, reward, done
 
     def process_action(self, action, q_value):
@@ -327,11 +336,11 @@ class RajagopalProcessor(rl.core.Processor):
         obs = np.reshape(processed_observation, (1, 1,) + processed_observation.shape)
         assert obs.shape == (1, 1, 84, 84)
         # Run a single image prediction and transform it to a list
-        diver_locations = np.squeeze(self.diver_model.predict(obs), axis=0)
+        diver_locations = np.squeeze(self.diver_model.predict(obs), axis=0).round()
         # Update the previous output before replacing current output
         self.prev_diver_output = self.diver_output
         # If none of the outputs were above the threshold (i.e., zero vector output), default to 'no_divers'
-        if not np.any(diver_locations):
+        if np.all(diver_locations == 0):
             self.diver_output = np.array([1, 0, 0, 0, 0])
             self.cond_matrix[-1] = 0
         # Set the current output and update conditional matrix
@@ -431,11 +440,16 @@ class RajagopalProcessor(rl.core.Processor):
             diver_movement_signal: float
                 A shaping signal value for moving towards a quadrant that contains a diver.
         """
+
         # If the diver output has the 'no_divers' bit on, return a mask of all values.
-        if self.diver_output[0] == 1:
+        # This also covers if somehow a 'zero vector' is output by the model.
+        if self.diver_output[0] == 1 or np.all(self.diver_output == 0):
             return np.ones(shape=(18,), dtype='bool')
         else:
             diver_output = self.diver_output
         actions_to_reward = np.zeros(shape=(18,), dtype='float32')
         np.any((self.location_action_mapping * diver_output), axis=1, out=actions_to_reward)
+        if np.all(actions_to_reward == 0):
+            print(f"diver output: {diver_output}")
+            print(f"actions_to_reward: {actions_to_reward}")
         return actions_to_reward

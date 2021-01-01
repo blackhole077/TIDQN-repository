@@ -38,7 +38,7 @@ def merged_model(input_shape, window_length, nb_actions, second_input_shape):
     output = Dense(nb_actions, activation='linear')(merged)
     # Creat the overall model (mdp_input -> LazyFrames, cond_matrix_input -> Conditional Matrix)
     model = Model(inputs=[mdp_input, cond_matrix_input], outputs=output)
-    print(model.summary())
+    model.summary()
     return model
 
 # INPUT_SHAPE = (84, 84)
